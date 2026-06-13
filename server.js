@@ -1,21 +1,27 @@
 /**
- * Trading Platform Server v5.0 — 4-Tier Dynamic Pyramid (90-Day Window)
- * 
+ * Trading Platform Server v5.0 — 9-Tier Dynamic Pyramid (7-Week Cycle)
+ *
  * TIERS (by deposit amount):
- *   Bronze:   $10-$49   deposit | $0.50/day profit | 3 active Bronze+ referrals | $4/week cap
- *   Silver:   $50-$99  deposit | $2.50/day profit | 3 active Silver+ referrals | $8/week cap
- *   Platinum: $100-$499 deposit | $5.00/day profit | 3 active Platinum+ referrals | $20/week cap
- *   Gold:     $500+    deposit | $60/day profit   | 3 active Gold referrals | $100/week cap
- * 
+ *   Bronze:   $10-$49    | 20%/week | 3 referrals from Bronze+
+ *   Silver:   $50-$99    | 20%/week | 3 referrals from Silver+
+ *   Gold:     $100-$249  | 20%/week | 3 referrals from Gold+
+ *   Platinum: $250-$499  | 20%/week | 3 referrals from Platinum+
+ *   Diamond:  $500-$999  | 20%/week | 3 referrals from Diamond+
+ *   VIP:      $1,000-$2,499 | 20%/week | 3 referrals from VIP+
+ *   Elite:    $2,500-$4,999 | 20%/week | 3 referrals from Elite+
+ *   Royal:    $5,000-$9,999 | 20%/week | 3 referrals from Royal+
+ *   Legend:   $10,000+   | 20%/week | 3 referrals from Legend
+ *
  * RULES:
  *   - Tier determined by deposit amount (dynamic ranges)
- *   - Tier-matching: referrals must match or exceed user's plan level
- *   - ABSOLUTE RULE: < 3 approved direct downline referrals = NO PAYOUT
+ *   - Weekly profit = 20% of deposit amount
+ *   - 5 weeks = return 100% of capital
+ *   - Week 6-7 = pure profit (40% extra)
+ *   - Week 7 ends -> account locked -> must re-deposit + 3 new referrals
+ *   - STRICT: < 3 approved downline referrals from same tier+ = NO PAYOUT
  *   - Mandatory referral code at registration
- *   - Weekly withdrawal cap resets every 7 days
- *   - 90-day operation window from first deposit approval
  *   - Commission: 20% admin / 10% L1 / 5% L2
- *   - Security: JWT + bcrypt + Helmet + Rate Limiting + File-based DB
+ *   - Security: JWT + bcrypt + Helmet + Rate Limiting
  */
 
 const express = require('express');
@@ -28,13 +34,10 @@ const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
 
-// Global error handlers to prevent silent crashes
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err));
 process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', err));
 
 const app = express();
-// trust proxy disabled - prevents rate limit bypass via X-Forwarded-For spoofing
-// Only enable behind a trusted reverse proxy with explicit proxy IPs
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '10kb' }));
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*', methods: ['GET', 'POST'], credentials: true }));
@@ -51,41 +54,53 @@ const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASS_HASH || '$2b$12$4DY6ysfcSJCjr
 const USDT_WALLET = process.env.USDT_WALLET || 'TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn';
 const DB_FILE = path.join(__dirname, 'database.json');
 
-// Root referral codes — always valid, no DB lookup required
 const ROOT_REFERRAL_CODES = ['BOOT00'];
-
-// Commission rates
 const COMM_ADMIN = 0.20;
 const COMM_L1 = 0.10;
 const COMM_L2 = 0.05;
 
-// ============ 4-TIER DEFINITIONS (Dynamic Ranges) ============
-// Tier is determined by deposit AMOUNT, not by fixed tier key
+// ============ CYCLE CONSTANTS ============
+const WEEKLY_PROFIT_PCT = 0.20;  // 20% per week
+const CYCLE_WEEKS = 7;           // total cycle: 7 weeks
+const CAPITAL_WEEKS = 5;         // weeks 1-5 = capital return
+const MAX_WITHDRAWAL_PCT = 1.40; // 140% of deposit (100% capital + 40% profit)
+
+// ============ 9-TIER DEFINITIONS ============
 const TIERS = {
-  bronze:  { level: 1, name: 'Bronze 🥉',  minDeposit: 10,  maxDeposit: 49,   dailyProfit: 0.50,  minReferrals: 3, weeklyCap: 4,   label: '$0.50/يوم' },
-  silver:  { level: 2, name: 'Silver 🥈',  minDeposit: 50,  maxDeposit: 99,   dailyProfit: 2.50,  minReferrals: 3, weeklyCap: 8,   label: '$2.50/يوم' },
-  platinum:{ level: 3, name: 'Platinum 🥇', minDeposit: 100, maxDeposit: 499,  dailyProfit: 5.00,  minReferrals: 3, weeklyCap: 20,  label: '$5.00/يوم' },
-  gold:    { level: 4, name: 'Gold 💎',     minDeposit: 500, maxDeposit: Infinity, dailyProfit: 60, minReferrals: 3, weeklyCap: 100, label: '$60/يوم' },
+  bronze:   { level: 1, name: 'Bronze',   minDeposit: 10,     maxDeposit: 49,      label: '$10-$49' },
+  silver:   { level: 2, name: 'Silver',   minDeposit: 50,     maxDeposit: 99,      label: '$50-$99' },
+  gold:     { level: 3, name: 'Gold',     minDeposit: 100,    maxDeposit: 249,     label: '$100-$249' },
+  platinum: { level: 4, name: 'Platinum', minDeposit: 250,    maxDeposit: 499,     label: '$250-$499' },
+  diamond:  { level: 5, name: 'Diamond',  minDeposit: 500,    maxDeposit: 999,     label: '$500-$999' },
+  vip:      { level: 6, name: 'VIP',      minDeposit: 1000,   maxDeposit: 2499,    label: '$1,000-$2,499' },
+  elite:    { level: 7, name: 'Elite',    minDeposit: 2500,   maxDeposit: 4999,    label: '$2,500-$4,999' },
+  royal:    { level: 8, name: 'Royal',    minDeposit: 5000,   maxDeposit: 9999,    label: '$5,000-$9,999' },
+  legend:   { level: 9, name: 'Legend',   minDeposit: 10000,  maxDeposit: Infinity, label: '$10,000+' },
 };
 
-// 90-day operation window (in milliseconds)
-const OPERATION_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
-
-// Resolve tier by deposit amount (dynamic range lookup)
 function getTierByAmount(amount) {
   const amt = Number(amount);
-  if (amt >= 500) return TIERS.gold;
-  if (amt >= 100) return TIERS.platinum;
+  if (amt >= 10000) return TIERS.legend;
+  if (amt >= 5000) return TIERS.royal;
+  if (amt >= 2500) return TIERS.elite;
+  if (amt >= 1000) return TIERS.vip;
+  if (amt >= 500) return TIERS.diamond;
+  if (amt >= 250) return TIERS.platinum;
+  if (amt >= 100) return TIERS.gold;
   if (amt >= 50) return TIERS.silver;
   if (amt >= 10) return TIERS.bronze;
   return null;
 }
 
-// Get tier key by deposit amount
 function getTierKeyByAmount(amount) {
   const amt = Number(amount);
-  if (amt >= 500) return 'gold';
-  if (amt >= 100) return 'platinum';
+  if (amt >= 10000) return 'legend';
+  if (amt >= 5000) return 'royal';
+  if (amt >= 2500) return 'elite';
+  if (amt >= 1000) return 'vip';
+  if (amt >= 500) return 'diamond';
+  if (amt >= 250) return 'platinum';
+  if (amt >= 100) return 'gold';
   if (amt >= 50) return 'silver';
   if (amt >= 10) return 'bronze';
   return null;
@@ -93,8 +108,15 @@ function getTierKeyByAmount(amount) {
 
 function getTier(key) { return TIERS[key] || null; }
 
+function getWeeklyProfit(depositAmount) {
+  return Number(depositAmount) * WEEKLY_PROFIT_PCT;
+}
+
+function getDailyProfit(depositAmount) {
+  return getWeeklyProfit(depositAmount) / 7;
+}
+
 // ============ DATABASE ============
-// Auto-detect: PostgreSQL on Render (DATABASE_URL set), JSON file locally
 const USE_PG = !!process.env.DATABASE_URL;
 
 let pgPool = null;
@@ -107,15 +129,17 @@ if (USE_PG) {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
-  // Initialize tables on startup
   (async () => {
     try {
       await pgPool.query(`
         CREATE TABLE IF NOT EXISTS users (
           id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
           referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
+          deposit_amount DECIMAL(12,2) DEFAULT 0,
           balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
           weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
+          cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
+          total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0,
           created_at TIMESTAMP DEFAULT NOW(), role VARCHAR(20) DEFAULT 'user'
         );
         CREATE TABLE IF NOT EXISTS deposits (
@@ -132,11 +156,8 @@ if (USE_PG) {
           amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
         );
       `);
-      // Seed admin user if not exists
       const adminExists = await pgPool.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
       if (adminExists.rowCount === 0) {
-        const bcrypt = require('bcryptjs');
-        const crypto = require('crypto');
         const hash = await bcrypt.hash('haydar988522605gmail', 12);
         await pgPool.query(
           'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
@@ -148,7 +169,6 @@ if (USE_PG) {
   })();
 }
 
-// Legacy JSON file DB for local development
 function readDB() {
   try {
     if (!fs.existsSync(DB_FILE)) {
@@ -159,83 +179,82 @@ function readDB() {
     return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   } catch { return { users: [], deposits: [], withdraws: [], transactions: [] }; }
 }
+
 function writeDB(d) { fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2)); }
 
-// DB helper functions - use PostgreSQL when available
 async function dbRead() {
   if (USE_PG && pgPool) {
-    const { rows } = await pgPool.query('SELECT * FROM users ORDER BY created_at DESC');
+    const { rows: users } = await pgPool.query('SELECT * FROM users ORDER BY created_at DESC');
     const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
     const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
     const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
-    return { users: rows, deposits, withdraws, transactions };
+    return { users, deposits, withdraws, transactions };
   }
   return readDB();
 }
 
 async function dbWriteDb(d) {
   if (USE_PG && pgPool) {
-    // Write users to PG
     for (const u of d.users) {
       await pgPool.query(`
-        INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, balance, total_commission, weekly_withdrawn, week_start, role, created_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         ON CONFLICT (username) DO UPDATE SET
-          balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan,
+          balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount,
           total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn,
-          week_start=EXCLUDED.week_start, role=EXCLUDED.role
-      `, [u.id||require('crypto').randomUUID(), u.username, u.password,
-          u.referralCode||u.referral_code, u.referredBy||u.referred_by,
-          u.activePlan||u.active_plan, u.balance||0, u.totalCommission||0,
-          u.weeklyWithdrawn||0, u.weekStart||0, u.role||'user',
-          u.createdAt||u.created_at||new Date().toISOString()]);
+          week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start,
+          total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role
+      `, [u.id || crypto.randomUUID(), u.username, u.password,
+          u.referralCode || u.referral_code, u.referredBy || u.referred_by,
+          u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0,
+          u.balance || 0, u.totalCommission || 0,
+          u.weeklyWithdrawn || 0, u.weekStart || 0,
+          u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0,
+          u.role || 'user',
+          u.createdAt || u.created_at || new Date().toISOString()]);
     }
-    // Write deposits to PG
     for (const dep of d.deposits) {
       await pgPool.query(`
         INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status
-      `, [dep.id||require('crypto').randomUUID(), dep.username, dep.tier,
-          dep.amount, dep.txId||dep.tx_id||'manual', dep.status,
-          dep.createdAt||dep.created_at||new Date().toISOString()]);
+      `, [dep.id || crypto.randomUUID(), dep.username, dep.tier,
+          dep.amount, dep.txId || dep.tx_id || 'manual', dep.status,
+          dep.createdAt || dep.created_at || new Date().toISOString()]);
     }
-    // Write withdraws to PG
     for (const w of d.withdraws) {
       await pgPool.query(`
         INSERT INTO withdraws (id, username, amount, status, created_at)
         VALUES ($1,$2,$3,$4,$5)
         ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status
-      `, [w.id||require('crypto').randomUUID(), w.username, w.amount,
-          w.status, w.createdAt||w.created_at||new Date().toISOString()]);
+      `, [w.id || crypto.randomUUID(), w.username, w.amount,
+          w.status, w.createdAt || w.created_at || new Date().toISOString()]);
     }
     return;
   }
   writeDB(d);
 }
 
-async function dbWrite(collection, operation, data) {
-  if (USE_PG && pgPool) {
-    // PostgreSQL writes handled by individual route handlers
-    return;
-  }
-  // For JSON file, routes use readDB/writeDB directly
-}
-
 // ============ JWT ============
 function generateToken(p) { return jwt.sign(p, JWT_SECRET, { expiresIn: '24h' }); }
+
 function authenticateToken(req, res, next) {
   const h = req.headers['authorization'];
   const t = h && h.split(' ')[1];
   if (!t) return res.status(401).json({ success: false, message: 'No token.' });
-  jwt.verify(t, JWT_SECRET, (err, u) => { if (err) return res.status(403).json({ success: false, message: 'Invalid token.' }); req.user = u; next(); });
+  jwt.verify(t, JWT_SECRET, (err, u) => {
+    if (err) return res.status(403).json({ success: false, message: 'Invalid token.' });
+    req.user = u;
+    next();
+  });
 }
+
 function requireAdmin(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only.' });
   next();
 }
 
-// ============ HEALTH CHECK ============
+// ============ HEALTH ============
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -248,7 +267,6 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     if (!referralCode) return res.status(400).json({ success: false, message: 'Referral code is required.' });
     const db = await dbRead();
     if (db.users.find(u => u.username === username)) return res.status(400).json({ success: false, message: 'Username already exists.' });
-    // Check root codes first (no DB lookup), then check user-generated codes
     const isRootCode = ROOT_REFERRAL_CODES.includes(referralCode.toUpperCase());
     const referrer = isRootCode ? { username: 'SYSTEM', referralCode: referralCode.toUpperCase() } : db.users.find(u => u.referralCode === referralCode);
     if (!referrer) return res.status(400).json({ success: false, message: 'Invalid referral code.' });
@@ -257,8 +275,9 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const newUser = {
       id: crypto.randomUUID(), username, password: hashedPassword,
       referralCode: myCode, referredBy: referrer.username,
-      activePlan: null, balance: 0, totalCommission: 0,
+      activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0,
       weeklyWithdrawn: 0, weekStart: Date.now(),
+      cycleWeek: 1, cycleStart: 0, totalWithdrawnCycle: 0,
       createdAt: new Date().toISOString(), role: 'user',
     };
     db.users.push(newUser);
@@ -293,53 +312,79 @@ app.post('/api/auth/admin/login', authLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ============ USER ============
+// ============ USER PROFILE ============
 app.get('/api/user/profile', authenticateToken, async (req, res) => {
   try {
     const db = await dbRead();
     const user = db.users.find(u => u.username === req.user.username);
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
-    const refStats = getReferralStats(user.username, db);
-    const tier = user.activePlan ? getTier(user.activePlan) : null;
 
-    // Count approved direct downline referrals (for withdrawal lock)
+    const tier = user.activePlan ? getTier(user.activePlan) : null;
+    const depositAmt = user.depositAmount || 0;
+    const weeklyProfit = getWeeklyProfit(depositAmt);
+    const dailyProfit = getDailyProfit(depositAmt);
+
+    // Count qualified referrals (same tier+, with approved deposit)
+    const userTierLevel = tier ? tier.level : 0;
     const allDirectDownline = db.users.filter(u => u.referredBy === user.username);
-    const approvedDownline = allDirectDownline.filter(ref =>
-      db.deposits.some(d => d.username === ref.username && d.status === 'approved')
-    );
+    const approvedDownline = allDirectDownline.filter(ref => {
+      if (!ref.activePlan) return false;
+      const refTier = getTier(ref.activePlan);
+      if (!refTier) return false;
+      const hasApproved = db.deposits.some(d => d.username === ref.username && d.status === 'approved');
+      return hasApproved && refTier.level >= userTierLevel;
+    });
     const approvedDownlineCount = approvedDownline.length;
     const canWithdraw = approvedDownlineCount >= 3;
 
-    // 90-day window info
-    const userApprovedDeposits = db.deposits
-      .filter(d => d.username === user.username && d.status === 'approved')
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    let windowExpiresAt = null;
-    let windowExpired = false;
-    if (userApprovedDeposits.length > 0) {
-      const firstDepositTime = new Date(userApprovedDeposits[0].createdAt).getTime();
-      windowExpiresAt = new Date(firstDepositTime + OPERATION_WINDOW_MS).toISOString();
-      windowExpired = Date.now() - firstDepositTime > OPERATION_WINDOW_MS;
+    // Cycle tracking
+    let cycleWeek = user.cycleWeek || 1;
+    const cycleStart = user.cycleStart || 0;
+    const totalWithdrawnCycle = user.totalWithdrawnCycle || 0;
+
+    if (cycleStart > 0) {
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const elapsed = Date.now() - cycleStart;
+      cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1);
+      if (cycleWeek !== user.cycleWeek) {
+        user.cycleWeek = cycleWeek;
+      }
     }
 
+    const cycleExpired = cycleWeek > CYCLE_WEEKS;
+    const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
+
     res.json({
-      success: true, user: {
-        username: user.username, balance: user.balance, totalCommission: user.totalCommission || 0,
-        activePlan: user.activePlan, referrer: user.referrer, referralCode: user.referralCode,
-        activeReferrals: refStats.qualified, totalReferrals: refStats.total,
-        tierWeeklyCap: tier ? tier.weeklyCap : 0,
-        weeklyWithdrawn: user.weeklyWithdrawn || 0,
+      success: true,
+      user: {
+        username: user.username,
+        balance: user.balance,
+        depositAmount: depositAmt,
+        totalCommission: user.totalCommission || 0,
+        activePlan: user.activePlan,
+        tierName: tier ? tier.name : null,
+        tierLabel: tier ? tier.label : null,
+        referralCode: user.referralCode,
+        referrer: user.referredBy,
+        dailyProfit: +dailyProfit.toFixed(2),
+        weeklyProfit: +weeklyProfit.toFixed(2),
         canWithdraw,
         approvedDownlineCount,
         requiredReferrals: 3,
+        cycleWeek,
+        cycleTotalWeeks: CYCLE_WEEKS,
+        cycleExpired,
+        totalWithdrawnCycle,
+        maxWithdrawal: +maxWithdrawal.toFixed(2),
+        remainingWithdrawal: +Math.max(0, maxWithdrawal - totalWithdrawnCycle).toFixed(2),
+        weeklyWithdrawn: user.weeklyWithdrawn || 0,
         createdAt: user.createdAt,
-        windowExpiresAt,
-        windowExpired,
       }
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ============ REFERRALS ============
 app.get('/api/user/referrals', authenticateToken, async (req, res) => {
   try {
     const db = await dbRead();
@@ -350,17 +395,20 @@ app.get('/api/user/referrals', authenticateToken, async (req, res) => {
 
 // ============ TIERS ============
 app.get('/api/tiers', (req, res) => {
-  // Return tiers with amount ranges for frontend
-  const tiersWithRanges = {};
+  const tiersOut = {};
   for (const [key, t] of Object.entries(TIERS)) {
-    tiersWithRanges[key] = {
+    const minW = getWeeklyProfit(t.minDeposit);
+    const maxW = t.maxDeposit === Infinity ? null : getWeeklyProfit(t.maxDeposit);
+    tiersOut[key] = {
       ...t,
-      depositRange: t.maxDeposit === Infinity
-        ? `$${t.minDeposit}+`
-        : `$${t.minDeposit}-$${t.maxDeposit}`,
+      level: t.level,
+      weeklyProfitMin: +minW.toFixed(2),
+      weeklyProfitMax: maxW ? +maxW.toFixed(2) : null,
+      cycleWeeks: CYCLE_WEEKS,
+      maxTotalPct: MAX_WITHDRAWAL_PCT * 100,
     };
   }
-  res.json({ success: true, tiers: tiersWithRanges });
+  res.json({ success: true, tiers: tiersOut, weeklyPct: WEEKLY_PROFIT_PCT * 100 });
 });
 
 // ============ DEPOSIT ============
@@ -369,10 +417,9 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
     const { amount, txId } = req.body;
     const amt = Number(amount);
     if (!amt || amt < 10) return res.status(400).json({ success: false, message: 'Minimum deposit is $10.' });
-    // Resolve tier dynamically by deposit amount
     const tier = getTierByAmount(amt);
     const tierKey = getTierKeyByAmount(amt);
-    if (!tier || !tierKey) return res.status(400).json({ success: false, message: 'Invalid deposit amount. Minimum $10.' });
+    if (!tier || !tierKey) return res.status(400).json({ success: false, message: 'Invalid deposit amount.' });
     const db = await dbRead();
     const user = db.users.find(u => u.username === req.user.username);
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
@@ -388,8 +435,6 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
 });
 
 // ============ WITHDRAW ============
-// ABSOLUTE RULE: Any user with fewer than 3 approved direct downline referrals
-// is HARD-BLOCKED from all payout transactions. No exceptions.
 app.post('/api/withdraw', authenticateToken, async (req, res) => {
   try {
     const { amount } = req.body;
@@ -400,67 +445,83 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     if (!user.activePlan) return res.status(400).json({ success: false, message: 'No active plan. Deposit first.' });
 
-    // --- STRICT REFERRAL LOCK: Count approved direct downline referrals ---
-    // A "direct downline referral" = a user who was referred by this user AND has at least one approved deposit
+    const tier = getTier(user.activePlan);
+    const depositAmt = user.depositAmount || 0;
+    const weeklyProfit = getWeeklyProfit(depositAmt);
+
+    // STRICT REFERRAL LOCK: 3 approved downline from same tier+
+    const userTierLevel = tier ? tier.level : 0;
     const allDirectDownline = db.users.filter(u => u.referredBy === user.username);
-    const approvedDownline = allDirectDownline.filter(ref =>
-      db.deposits.some(d => d.username === ref.username && d.status === 'approved')
-    );
+    const approvedDownline = allDirectDownline.filter(ref => {
+      if (!ref.activePlan) return false;
+      const refTier = getTier(ref.activePlan);
+      if (!refTier) return false;
+      const hasApproved = db.deposits.some(d => d.username === ref.username && d.status === 'approved');
+      return hasApproved && refTier.level >= userTierLevel;
+    });
     const approvedDownlineCount = approvedDownline.length;
 
-    // ABSOLUTE BLOCK: Less than 3 approved direct downline = NO PAYOUT
     if (approvedDownlineCount < 3) {
       return res.status(403).json({
         success: false,
-        message: `🔒 السحب مقفل! تحتاج 3 إحالات مباشرة مؤكدة على الأقل لتفعيل السحب. حالياً: ${approvedDownlineCount}/3`,
+        message: 'Referral lock! Need 3 approved downline from your tier or higher. Currently: ' + approvedDownlineCount + '/3',
         code: 'REFERRAL_LOCK',
         approvedReferrals: approvedDownlineCount,
         required: 3,
       });
     }
 
-    // --- 90-DAY OPERATION WINDOW CHECK ---
-    // Find the user's first approved deposit to determine window start
-    const userApprovedDeposits = db.deposits
-      .filter(d => d.username === user.username && d.status === 'approved')
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    if (userApprovedDeposits.length > 0) {
-      const firstDepositTime = new Date(userApprovedDeposits[0].createdAt).getTime();
-      const now = Date.now();
-      if (now - firstDepositTime > OPERATION_WINDOW_MS) {
-        return res.status(403).json({
-          success: false,
-          message: '⏰ انتهت فترة التشغيل (90 يوم). تواصل مع الإدارة.',
-          code: 'WINDOW_EXPIRED',
-        });
-      }
+    // CYCLE CHECK: 7-week limit
+    let cycleWeek = user.cycleWeek || 1;
+    const cycleStart = user.cycleStart || 0;
+    let totalWithdrawnCycle = user.totalWithdrawnCycle || 0;
+
+    if (cycleStart > 0) {
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const elapsed = Date.now() - cycleStart;
+      cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1);
     }
 
-    // --- TIER-BASED WEEKLY CAP (from dynamic tier) ---
-    const tier = getTier(user.activePlan);
-    if (!tier) return res.status(400).json({ success: false, message: 'Invalid tier configuration.' });
+    if (cycleWeek > CYCLE_WEEKS) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cycle expired! ' + CYCLE_WEEKS + ' weeks completed. You must re-deposit and bring 3 new referrals.',
+        code: 'CYCLE_EXPIRED',
+        cycleWeek,
+      });
+    }
 
+    // MAX WITHDRAWAL CHECK: 140% of deposit
+    const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
+    if (totalWithdrawnCycle + amt > maxWithdrawal) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum withdrawal for this cycle reached. Remaining: $' + (maxWithdrawal - totalWithdrawnCycle).toFixed(2),
+        code: 'CYCLE_MAX',
+        remaining: +(maxWithdrawal - totalWithdrawnCycle).toFixed(2),
+      });
+    }
+
+    // WEEKLY PROFIT CAP
     const weekElapsed = Date.now() - (user.weekStart || 0);
     const weekMs = 7 * 24 * 60 * 60 * 1000;
     let weeklyWithdrawn = user.weeklyWithdrawn || 0;
     if (weekElapsed > weekMs) { weeklyWithdrawn = 0; user.weekStart = Date.now(); }
-    if (weeklyWithdrawn + amt > tier.weeklyCap) {
+    if (weeklyWithdrawn + amt > weeklyProfit) {
       return res.status(400).json({
         success: false,
-        message: `Weekly cap exceeded. Remaining: $${(tier.weeklyCap - weeklyWithdrawn).toFixed(2)} / $${tier.weeklyCap.toFixed(2)}`,
+        message: 'Weekly profit cap exceeded. Remaining this week: $' + (weeklyProfit - weeklyWithdrawn).toFixed(2),
         code: 'WEEKLY_CAP',
-        remaining: +(tier.weeklyCap - weeklyWithdrawn).toFixed(2),
-        weeklyCap: tier.weeklyCap,
+        remaining: +(weeklyProfit - weeklyWithdrawn).toFixed(2),
+        weeklyProfit: +weeklyProfit.toFixed(2),
       });
     }
 
-    // Check pending withdrawals to prevent over-withdrawal
-    const pendingWd = db.withdraws.filter(w => w.username === user.username && w.status === 'pending');
-    const totalPending = pendingWd.reduce((s, w) => s + w.amount, 0);
-    if (user.balance < amt + totalPending) {
+    // Check balance
+    if (user.balance < amt) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient balance. Available: $${(user.balance - totalPending).toFixed(2)} (pending: $${totalPending.toFixed(2)})`,
+        message: 'Insufficient balance. Available: $' + user.balance.toFixed(2),
         code: 'INSUFFICIENT_BALANCE',
       });
     }
@@ -471,23 +532,34 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
     };
     db.withdraws.push(withdraw);
     user.weeklyWithdrawn = weeklyWithdrawn + amt;
+    user.totalWithdrawnCycle = totalWithdrawnCycle + amt;
+    user.cycleWeek = cycleWeek;
     await dbWriteDb(db);
     res.json({ success: true, message: 'Withdraw request submitted. Pending admin approval.', withdraw });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ============ ADMIN ============
+// ============ ADMIN: USERS ============
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const db = await dbRead();
     const users = db.users.map(u => {
-      const refStats = getReferralStats(u.username, db);
       const tier = u.activePlan ? getTier(u.activePlan) : null;
+      const depositAmt = u.depositAmount || 0;
       return {
-        username: u.username, balance: u.balance, totalCommission: u.totalCommission || 0,
-        activePlan: u.activePlan, referrer: u.referrer, referralCode: u.referralCode,
-        activeReferrals: refStats.qualified, totalReferrals: refStats.total,
-        tierWeeklyCap: tier ? tier.weeklyCap : 0,
+        username: u.username,
+        balance: u.balance,
+        depositAmount: depositAmt,
+        totalCommission: u.totalCommission || 0,
+        activePlan: u.activePlan,
+        tierName: tier ? tier.name : null,
+        referralCode: u.referralCode,
+        referredBy: u.referredBy,
+        weeklyProfit: +getWeeklyProfit(depositAmt).toFixed(2),
+        cycleWeek: u.cycleWeek || 1,
+        cycleExpired: (u.cycleWeek || 1) > CYCLE_WEEKS,
+        totalWithdrawnCycle: u.totalWithdrawnCycle || 0,
+        maxWithdrawal: +(depositAmt * MAX_WITHDRAWAL_PCT).toFixed(2),
         createdAt: u.createdAt,
       };
     });
@@ -495,6 +567,7 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ============ ADMIN: DEPOSITS ============
 app.get('/api/admin/deposits', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const db = await dbRead();
@@ -510,14 +583,19 @@ app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, asy
     if (deposit.status !== 'pending') return res.status(400).json({ success: false, message: 'Already processed.' });
     const user = db.users.find(u => u.username === deposit.username);
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
-    // Resolve tier dynamically by deposit amount
-    const tier = getTierByAmount(deposit.amount);
     const tierKey = getTierKeyByAmount(deposit.amount);
     deposit.status = 'approved';
     user.balance = (user.balance || 0) + deposit.amount;
+    user.depositAmount = deposit.amount;
     if (tierKey) user.activePlan = tierKey;
+    // Start cycle on first approved deposit
+    if (!user.cycleStart || user.cycleStart === 0) {
+      user.cycleStart = Date.now();
+      user.cycleWeek = 1;
+      user.totalWithdrawnCycle = 0;
+    }
     // Commission distribution
-    if (user.referredBy && tier) {
+    if (user.referredBy) {
       const l1 = db.users.find(u => u.username === user.referredBy);
       if (l1) {
         const l1Comm = deposit.amount * COMM_L1;
@@ -549,6 +627,7 @@ app.post('/api/admin/deposits/:id/reject', authenticateToken, requireAdmin, asyn
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ============ ADMIN: WITHDRAWS ============
 app.get('/api/admin/withdraws', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const db = await dbRead();
@@ -579,7 +658,6 @@ app.post('/api/admin/withdraws/:id/reject', authenticateToken, requireAdmin, asy
     if (!withdraw) return res.status(404).json({ success: false, message: 'Withdraw not found.' });
     if (withdraw.status !== 'pending') return res.status(400).json({ success: false, message: 'Already processed.' });
     withdraw.status = 'rejected';
-    // Restore weekly withdrawn amount so user can try again
     const user = db.users.find(u => u.username === withdraw.username);
     if (user) {
       user.weeklyWithdrawn = (user.weeklyWithdrawn || 0) - withdraw.amount;
@@ -597,34 +675,7 @@ app.get('/api/admin/transactions', authenticateToken, requireAdmin, async (req, 
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ============ ACTIVATE PLAN ============
-app.post('/api/activate-plan', authenticateToken, async (req, res) => {
-  try {
-    const { tier: tierKey } = req.body;
-    const tier = getTier(tierKey);
-    if (!tier) return res.status(400).json({ success: false, message: 'Invalid tier.' });
-    const db = await dbRead();
-    const user = db.users.find(u => u.username === req.user.username);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
-    const depositAmount = tier.minDeposit || tier.deposit || 0;
-    if (user.balance < depositAmount) return res.status(400).json({ success: false, message: `Insufficient balance. Need $${depositAmount}.` });
-    user.balance -= depositAmount;
-    user.activePlan = tierKey;
-    await dbWriteDb(db);
-    res.json({ success: true, message: `Plan ${tier.name} activated!` });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-// ============ USER TRANSACTIONS ============
-app.get('/api/user/transactions', authenticateToken, async (req, res) => {
-  try {
-    const db = await dbRead();
-    const txns = db.transactions.filter(t => t.username === req.user.username);
-    res.json({ success: true, transactions: txns });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-// ============ ADMIN ACTION (approve/reject deposit/withdraw) ============
+// ============ ADMIN ACTION ============
 app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id, type, action } = req.body;
@@ -636,11 +687,16 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
         deposit.status = 'approved';
         const user = db.users.find(u => u.username === deposit.username);
         if (user) {
-          const tier = getTierByAmount(deposit.amount);
           const tierKey = getTierKeyByAmount(deposit.amount);
           user.balance = (user.balance || 0) + deposit.amount;
+          user.depositAmount = deposit.amount;
           if (tierKey) user.activePlan = tierKey;
-          if (user.referredBy && tier) {
+          if (!user.cycleStart || user.cycleStart === 0) {
+            user.cycleStart = Date.now();
+            user.cycleWeek = 1;
+            user.totalWithdrawnCycle = 0;
+          }
+          if (user.referredBy) {
             const l1 = db.users.find(u => u.username === user.referredBy);
             if (l1) {
               const l1Comm = deposit.amount * COMM_L1;
@@ -669,7 +725,6 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
         if (user && user.balance >= withdraw.amount) user.balance -= withdraw.amount;
       } else {
         withdraw.status = 'rejected';
-        // Restore weekly withdrawn amount so user can try again
         const user = db.users.find(u => u.username === withdraw.username);
         if (user) {
           user.weeklyWithdrawn = (user.weeklyWithdrawn || 0) - withdraw.amount;
@@ -678,14 +733,7 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
       }
     }
     await dbWriteDb(db);
-    res.json({ success: true, message: `${action} successful.` });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-// ============ ADMIN UPDATE WALLET ============
-app.post('/api/admin/update-wallet', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    res.json({ success: true, message: 'Wallet address updated (env variable required for persistence).' });
+    res.json({ success: true, message: action + ' successful.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -715,7 +763,6 @@ app.use(express.static(PUBLIC_DIR, {
   }
 }));
 
-// SPA fallback — serve index.html for any non-API route
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -727,20 +774,21 @@ app.use((req, res, next) => {
 
 // ============ START ============
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('\n========================================');
-  console.log('  Trading Platform Server v5.0');
-  console.log('  4-Tier Dynamic Pyramid (90-Day Window)');
-  console.log('  Bronze $10-49   | $4/week  | 3 referrals');
-  console.log('  Silver $50-99   | $8/week  | 3 referrals');
-  console.log('  Platinum $100-499 | $20/week | 3 referrals');
-  console.log('  Gold $500+      | $100/week | 3 referrals');
-  console.log('  STRICT: < 3 approved downline = NO PAYOUT');
+  console.log('');
   console.log('========================================');
-  console.log(`  Port: ${PORT} | Admin: ${ADMIN_USERNAME}`);
-  console.log('========================================\n');
+  console.log('  Trading Platform Server v5.0');
+  console.log('  9-Tier Dynamic Pyramid (7-Week Cycle)');
+  console.log('  Bronze $10-49 | Silver $50-99 | Gold $100-249');
+  console.log('  Platinum $250-499 | Diamond $500-999 | VIP $1K-2.4K');
+  console.log('  Elite $2.5K-4.9K | Royal $5K-9.9K | Legend $10K+');
+  console.log('  Weekly Profit: 20% | Cycle: 7 weeks');
+  console.log('  STRICT: < 3 same-tier referrals = NO PAYOUT');
+  console.log('  Week 7 = LOCKED -> re-deposit + 3 new referrals');
+  console.log('========================================');
+  console.log('  Port: ' + PORT + ' | Admin: ' + ADMIN_USERNAME);
+  console.log('========================================');
+  console.log('');
 });
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
-
-// Keep the event loop alive
-setInterval(() => {}, 60000);
+setInterval(function() {}, 60000);
