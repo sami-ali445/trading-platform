@@ -385,27 +385,41 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
     const db = await dbRead();
     const user = db.users.find(u => u.username === req.user.username);
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
-    const tier = user.activePlan ? getTier(user.activePlan) : null;
-    const depositAmt = user.depositAmount || 0;
+    const activePlan = user.activePlan || user.active_plan || null;
+    const tier = activePlan ? getTier(activePlan) : null;
+    const depositAmt = user.depositAmount || user.deposit_amount || 0;
     const weeklyProfit = getWeeklyProfit(depositAmt);
     const dailyProfit = getDailyProfit(depositAmt);
     const userTierLevel = tier ? tier.level : 0;
-    const allDirectDownline = db.users.filter(u => u.referredBy === user.username);
-    const approvedDownline = allDirectDownline.filter(ref => { if (!ref.activePlan) return false; const refTier = getTier(ref.activePlan); if (!refTier) return false; const hasApproved = db.deposits.some(d => d.username === ref.username && d.status === 'approved'); return hasApproved && refTier.level >= userTierLevel; });
+    const allDirectDownline = db.users.filter(u => (u.referredBy || u.referred_by) === user.username);
+    const approvedDownline = allDirectDownline.filter(ref => {
+      const refPlan = ref.activePlan || ref.active_plan || null;
+      if (!refPlan) return false;
+      const refTier = getTier(refPlan);
+      if (!refTier) return false;
+      const hasApproved = db.deposits.some(d => d.username === ref.username && d.status === 'approved');
+      return hasApproved && refTier.level >= userTierLevel;
+    });
     const approvedDownlineCount = approvedDownline.length;
     const canWithdraw = approvedDownlineCount >= 3;
-    let cycleWeek = user.cycleWeek || 1;
-    const cycleStart = user.cycleStart || 0;
-    const totalWithdrawnCycle = user.totalWithdrawnCycle || 0;
-    if (cycleStart > 0) { const weekMs = 7 * 24 * 60 * 60 * 1000; const elapsed = Date.now() - cycleStart; cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1); if (cycleWeek !== user.cycleWeek) user.cycleWeek = cycleWeek; }
+    let cycleWeek = user.cycleWeek || user.cycle_week || 1;
+    const cycleStart = user.cycleStart || user.cycle_start || 0;
+    const totalWithdrawnCycle = user.totalWithdrawnCycle || user.total_withdrawn_cycle || 0;
+    if (cycleStart > 0) { const weekMs = 7 * 24 * 60 * 60 * 1000; const elapsed = Date.now() - cycleStart; cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1); }
     const cycleExpired = cycleWeek > CYCLE_WEEKS;
     const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
-    res.json({ success: true, user: { username: user.username, balance: user.balance, depositAmount: depositAmt, totalCommission: user.totalCommission || 0, activePlan: user.activePlan, tierName: tier ? tier.name : null, tierLabel: tier ? tier.label : null, referralCode: user.referralCode, referrer: user.referredBy, dailyProfit: +dailyProfit.toFixed(2), weeklyProfit: +weeklyProfit.toFixed(2), canWithdraw, approvedDownlineCount, requiredReferrals: 3, cycleWeek, cycleTotalWeeks: CYCLE_WEEKS, cycleExpired, totalWithdrawnCycle, maxWithdrawal: +maxWithdrawal.toFixed(2), remainingWithdrawal: +Math.max(0, maxWithdrawal - totalWithdrawnCycle).toFixed(2), weeklyWithdrawn: user.weeklyWithdrawn || 0, createdAt: user.createdAt } });
+    const weeklyWithdrawn = user.weeklyWithdrawn || user.weekly_withdrawn || 0;
+    const totalCommission = user.totalCommission || user.total_commission || 0;
+    res.json({ success: true, user: { username: user.username, balance: user.balance || 0, depositAmount: depositAmt, totalCommission, activePlan, tierName: tier ? tier.name : null, tierLabel: tier ? tier.label : null, referralCode: user.referralCode || user.referral_code, referrer: user.referredBy || user.referred_by, dailyProfit: +dailyProfit.toFixed(2), weeklyProfit: +weeklyProfit.toFixed(2), canWithdraw, approvedDownlineCount, requiredReferrals: 3, cycleWeek, cycleTotalWeeks: CYCLE_WEEKS, cycleExpired, totalWithdrawnCycle, maxWithdrawal: +maxWithdrawal.toFixed(2), remainingWithdrawal: +Math.max(0, maxWithdrawal - totalWithdrawnCycle).toFixed(2), weeklyWithdrawn, role: user.role || 'user', createdAt: user.createdAt || user.created_at } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/user/referrals', authenticateToken, async (req, res) => {
-  try { const db = await dbRead(); const refs = db.users.filter(u => u.referredBy === req.user.username); res.json({ success: true, referrals: refs.map(r => ({ username: r.username, activePlan: r.activePlan, createdAt: r.createdAt })) }); } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const db = await dbRead();
+    const refs = db.users.filter(u => (u.referredBy || u.referred_by) === req.user.username);
+    res.json({ success: true, referrals: refs.map(r => ({ username: r.username, activePlan: r.activePlan || r.active_plan, createdAt: r.createdAt || r.created_at })) });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/tiers', (req, res) => {
@@ -457,7 +471,40 @@ app.post('/api/withdraw', authenticateToken, async (req, res) => {
 
 // ============ ADMIN ============
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
-  try { const db = await dbRead(); const users = db.users.map(u => { const tier = u.activePlan ? getTier(u.activePlan) : null; const depositAmt = u.depositAmount || 0; return { username: u.username, balance: u.balance, depositAmount: depositAmt, totalCommission: u.totalCommission || 0, activePlan: u.activePlan, tierName: tier ? tier.name : null, referralCode: u.referralCode, referredBy: u.referredBy, weeklyProfit: +getWeeklyProfit(depositAmt).toFixed(2), cycleWeek: u.cycleWeek || 1, cycleExpired: (u.cycleWeek || 1) > CYCLE_WEEKS, totalWithdrawnCycle: u.totalWithdrawnCycle || 0, maxWithdrawal: +(depositAmt * MAX_WITHDRAWAL_PCT).toFixed(2), createdAt: u.createdAt }; }); res.json({ success: true, users, total: users.length }); } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  try {
+    const db = await dbRead();
+    const users = db.users.map(u => {
+      const activePlan = u.activePlan || u.active_plan || null;
+      const tier = activePlan ? getTier(activePlan) : null;
+      const depositAmt = u.depositAmount || u.deposit_amount || 0;
+      const totalCommission = u.totalCommission || u.total_commission || 0;
+      const weeklyWithdrawn = u.weeklyWithdrawn || u.weekly_withdrawn || 0;
+      const cycleWeek = u.cycleWeek || u.cycle_week || 1;
+      const totalWithdrawnCycle = u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0;
+      const referredBy = u.referredBy || u.referred_by || null;
+      const referralCode = u.referralCode || u.referral_code || null;
+      return {
+        username: u.username,
+        balance: u.balance || 0,
+        depositAmount: depositAmt,
+        totalCommission,
+        activePlan,
+        tierName: tier ? tier.name : null,
+        tierLabel: tier ? tier.label : null,
+        referralCode,
+        referredBy,
+        role: u.role || 'user',
+        weeklyProfit: +getWeeklyProfit(depositAmt).toFixed(2),
+        cycleWeek,
+        cycleExpired: cycleWeek > CYCLE_WEEKS,
+        totalWithdrawnCycle,
+        maxWithdrawal: +(depositAmt * MAX_WITHDRAWAL_PCT).toFixed(2),
+        weeklyWithdrawn,
+        createdAt: u.createdAt || u.created_at
+      };
+    });
+    res.json({ success: true, users, total: users.length });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/admin/deposits', authenticateToken, requireAdmin, async (req, res) => { try { const db = await dbRead(); res.json({ success: true, deposits: db.deposits }); } catch (err) { res.status(500).json({ success: false, message: err.message }); } });
@@ -470,10 +517,13 @@ app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, asy
     const user = db.users.find(u => u.username === deposit.username);
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     const tierKey = getTierKeyByAmount(deposit.amount); deposit.status = 'approved';
-    user.balance = (user.balance || 0) + deposit.amount; user.depositAmount = deposit.amount;
+    user.balance = (user.balance || 0) + deposit.amount;
+    user.depositAmount = deposit.amount;
     if (tierKey) user.activePlan = tierKey;
-    if (!user.cycleStart || user.cycleStart === 0) { user.cycleStart = Date.now(); user.cycleWeek = 1; user.totalWithdrawnCycle = 0; }
-    if (user.referredBy) { const l1 = db.users.find(u => u.username === user.referredBy); if (l1) { const l1Comm = deposit.amount * COMM_L1; l1.balance = (l1.balance || 0) + l1Comm; l1.totalCommission = (l1.totalCommission || 0) + l1Comm; if (l1.referredBy) { const l2 = db.users.find(u => u.username === l1.referredBy); if (l2) { const l2Comm = deposit.amount * COMM_L2; l2.balance = (l2.balance || 0) + l2Comm; l2.totalCommission = (l2.totalCommission || 0) + l2Comm; } } } }
+    const cycleStart = user.cycleStart || user.cycle_start || 0;
+    if (!cycleStart || cycleStart === 0) { user.cycleStart = Date.now(); user.cycleWeek = 1; user.totalWithdrawnCycle = 0; }
+    const userReferrer = user.referredBy || user.referred_by;
+    if (userReferrer) { const l1 = db.users.find(u => u.username === userReferrer); if (l1) { const l1Comm = deposit.amount * COMM_L1; l1.balance = (l1.balance || 0) + l1Comm; l1.totalCommission = (l1.totalCommission || 0) + l1Comm; const l1Referrer = l1.referredBy || l1.referred_by; if (l1Referrer) { const l2 = db.users.find(u => u.username === l1Referrer); if (l2) { const l2Comm = deposit.amount * COMM_L2; l2.balance = (l2.balance || 0) + l2Comm; l2.totalCommission = (l2.totalCommission || 0) + l2Comm; } } } }
     await dbWriteDb(db); res.json({ success: true, message: 'Deposit approved.', deposit });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
