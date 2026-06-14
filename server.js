@@ -132,10 +132,10 @@ let pgPool = null;
     const { Pool } = require('pg');
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: { rejectUnauthorized: false },
-      max: 5,
+      ssl: true,
+      max: 3,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 15000,
     });
     pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
     pgPool.query('SELECT 1').then(() => {
