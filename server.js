@@ -31,7 +31,6 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const fs = require('fs');
 const path = require('path');
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err));
@@ -48,11 +47,18 @@ app.use(generalLimiter);
 
 // ============ CONFIGURATION ============
 const PORT = process.env.PORT || 4000;
+
+// CRITICAL: JWT_SECRET MUST be set as env var on Render
+// Without this, tokens change on every restart (all users logged out)
+if (!process.env.JWT_SECRET) {
+  console.error('[WARN] JWT_SECRET not set! Using random value - tokens will change on restart!');
+  console.error('[WARN] Set JWT_SECRET env var on Render immediately!');
+}
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+
 const ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASS_HASH || '$2b$12$4DY6ysfcSJCjrt3RrzSIyOoW.Or0CwPbn777zKd0OdZWgaCzyotWa';
 const USDT_WALLET = process.env.USDT_WALLET || 'TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn';
-const DB_FILE = path.join(__dirname, 'database.json');
 
 const ROOT_REFERRAL_CODES = ['BOOT00'];
 const COMM_ADMIN = 0.20;
@@ -110,134 +116,122 @@ function getTier(key) { return TIERS[key] || null; }
 function getWeeklyProfit(depositAmount) { return Number(depositAmount) * WEEKLY_PROFIT_PCT; }
 function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) / 7; }
 
-// ============ DATABASE ============
-let USE_PG = false;
+// ============ DATABASE (PostgreSQL only - no JSON fallback) ============
 let pgPool = null;
 
 (function initDB() {
-  if (!process.env.DATABASE_URL) {
-    console.log('[DB] No DATABASE_URL - using JSON file');
+  // On Render, DATABASE_URL is automatically set when PostgreSQL is attached
+  // We require it - no fallback to JSON (ephemeral storage)
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    console.error('[DB] FATAL: DATABASE_URL not set!');
+    console.error('[DB] Data will NOT persist! Attach PostgreSQL on Render.');
     return;
   }
   try {
     const { Pool } = require('pg');
     pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: dbUrl,
       ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 5000,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
     });
+    pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
     pgPool.query('SELECT 1').then(() => {
-      USE_PG = true;
       console.log('[DB] PostgreSQL connected OK');
     }).catch(e => {
-      console.error('[DB] PostgreSQL query failed:', e.message);
-      pgPool = null;
+      console.error('[DB] PostgreSQL test query failed:', e.message, e.code);
+      // Don't null the pool - it may recover
     });
   } catch(e) {
     console.error('[DB] PostgreSQL init failed:', e.message);
-    pgPool = null;
   }
 })();
 
-// Initialize tables
-(async () => {
+// Initialize tables on startup (with retry for Render cold starts)
+(async function initTables() {
   if (!pgPool) return;
-  try {
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
-        referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
-        deposit_amount DECIMAL(12,2) DEFAULT 0,
-        balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
-        weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
-        cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
-        total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW(), role VARCHAR(20) DEFAULT 'user'
-      );
-      CREATE TABLE IF NOT EXISTS deposits (
-        id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
-        amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS withdraws (
-        id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL,
-        status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS transactions (
-        id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL,
-        amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    await pgPool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
-    `);
-    const adminExists = await pgPool.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
-    if (adminExists.rowCount === 0) {
-      const hash = await bcrypt.hash('haydar988522605gmail', 12);
-      await pgPool.query(
-        'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
-        [crypto.randomUUID(), 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
-      );
-    }
-    console.log('[DB] PostgreSQL tables initialized');
-  } catch(e) { console.error('[DB] Init error:', e.message); }
-})();
-
-function readDB() {
-  try {
-    if (!fs.existsSync(DB_FILE)) {
-      const d = { users: [], deposits: [], withdraws: [], transactions: [] };
-      fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2));
-      return d;
-    }
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch { return { users: [], deposits: [], withdraws: [], transactions: [] }; }
-}
-
-function writeDB(d) { fs.writeFileSync(DB_FILE, JSON.stringify(d, null, 2)); }
-
-async function dbRead() {
-  if (USE_PG && pgPool) {
+  const maxRetries = 5;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-      const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
-      const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-      const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
-      return { users, deposits, withdraws, transactions };
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
+          referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
+          deposit_amount DECIMAL(12,2) DEFAULT 0,
+          balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
+          weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
+          cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
+          total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(), role VARCHAR(20) DEFAULT 'user'
+        );
+        CREATE TABLE IF NOT EXISTS deposits (
+          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
+          amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS withdraws (
+          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS transactions (
+          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL,
+          amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      // Ensure all columns exist (migration-safe)
+      await pgPool.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
+      `);
+      // Create admin if not exists
+      const adminExists = await pgPool.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
+      if (adminExists.rowCount === 0) {
+        const hash = await bcrypt.hash('haydar988522605gmail', 12);
+        await pgPool.query(
+          'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
+          [crypto.randomUUID(), 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
+        );
+        console.log('[DB] Admin user created');
+      }
+      console.log('[DB] PostgreSQL tables initialized');
+      return;
     } catch(e) {
-      console.error('[DB READ ERROR]', e.message);
-      return { users: [], deposits: [], withdraws: [], transactions: [] };
+      console.error('[DB] Init tables attempt', attempt, 'failed:', e.message);
+      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 2000 * attempt));
     }
   }
-  return readDB();
+})();
+
+// All DB operations go through PostgreSQL - NO JSON fallback
+async function dbRead() {
+  if (!pgPool) {
+    console.error('[DB READ] No pool!');
+    return { users: [], deposits: [], withdraws: [], transactions: [] };
+  }
+  const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
+  const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
+  const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
+  const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
+  return { users, deposits, withdraws, transactions };
 }
 
 async function dbWriteDb(d) {
-  if (USE_PG && pgPool) {
-    console.error('[DB WRITE] PostgreSQL mode -', d.users.length, 'users');
-    for (const u of d.users) {
-      try {
-        await pgPool.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
-        console.error('[DB WRITE] OK:', u.username);
-      } catch(e) {
-        console.error('[DB WRITE] Error:', u.username, e.message);
-      }
-    }
-    for (const dep of d.deposits) {
-      try { await pgPool.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
-    }
-    for (const w of d.withdraws) {
-      try { await pgPool.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
-    }
-    return;
+  if (!pgPool) { console.error('[DB WRITE] No pool!'); return; }
+  for (const u of d.users) {
+    try {
+      await pgPool.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
+    } catch(e) { console.error('[DB WRITE USER ERROR]', u.username, e.message); }
   }
-  console.error('[DB WRITE] JSON file mode -', d.users.length, 'users');
-  writeDB(d);
+  for (const dep of d.deposits) {
+    try { await pgPool.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
+  }
+  for (const w of d.withdraws) {
+    try { await pgPool.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
+  }
 }
 
 // ============ JWT ============
@@ -256,15 +250,13 @@ app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new D
 // ============ DB TEST ============
 app.get('/api/test/db', async (req, res) => {
   try {
-    if (USE_PG && pgPool) {
-      const result = await pgPool.query('SELECT COUNT(*) FROM users');
-      return res.json({ mode: 'PostgreSQL', userCount: result.rows[0].count });
-    } else {
-      const db = readDB();
-      return res.json({ mode: 'JSON', userCount: db.users.length });
+    if (!pgPool) {
+      return res.json({ mode: 'NO_DB', error: 'PostgreSQL pool not initialized', warning: 'DATABASE_URL not set!' });
     }
+    const result = await pgPool.query('SELECT COUNT(*) FROM users');
+    return res.json({ mode: 'PostgreSQL', userCount: parseInt(result.rows[0].count), status: 'connected' });
   } catch(e) {
-    return res.json({ error: e.message, usePG: USE_PG, pgPool: pgPool ? 'exists' : 'null' });
+    return res.json({ mode: 'PostgreSQL', error: e.message, status: 'error' });
   }
 });
 
