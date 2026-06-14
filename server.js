@@ -331,11 +331,14 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 app.post('/api/auth/admin/login', authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
-    if (username !== ADMIN_USERNAME) return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
-    const valid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    if (!username || !password) return res.status(400).json({ success: false, message: 'Username and password required.' });
+    const db = await dbRead();
+    const user = db.users.find(u => u.username === username && u.role === 'admin');
+    if (!user) return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
-    const token = generateToken({ username: ADMIN_USERNAME, role: 'admin' });
-    res.json({ success: true, token, username: ADMIN_USERNAME, role: 'admin' });
+    const token = generateToken({ username: user.username, role: 'admin' });
+    res.json({ success: true, token, username: user.username, role: 'admin' });
   } catch (err) { console.error('[ADMIN LOGIN ERROR]', err); res.status(500).json({ success: false, message: err.message || 'Internal server error' }); }
 });
 
