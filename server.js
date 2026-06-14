@@ -120,36 +120,39 @@ function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) /
 let pgPool = null;
 
 (function initDB() {
-  // On Render, DATABASE_URL is automatically set when PostgreSQL is attached
-  // We require it - no fallback to JSON (ephemeral storage)
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     console.error('[DB] FATAL: DATABASE_URL not set!');
-    console.error('[DB] Data will NOT persist! Attach PostgreSQL on Render.');
     return;
   }
   try {
-    const { Pool } = require('pg');
+    const pg = require('pg');
+    const { Pool } = pg;
+    
+    // Parse connection string to check sslmode
+    const needsSsl = dbUrl.includes('sslmode=require') || dbUrl.includes('ssl=true');
+    
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 15000,
+      ssl: false,
+      max: 2,
+      min: 0,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 30000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
+    
     pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
-    // Test connection with detailed logging
+    pgPool.on('connect', () => console.log('[DB] New client connected'));
+    
     pgPool.query('SELECT 1 as test').then((result) => {
-      console.log('[DB] PostgreSQL connected OK, test:', JSON.stringify(result.rows[0]));
+      console.log('[DB] PostgreSQL connected OK');
     }).catch(e => {
-      console.error('[DB] PostgreSQL test query failed!');
-      console.error('[DB] Error code:', e.code);
-      console.error('[DB] Error message:', e.message);
-      console.error('[DB] Error detail:', e.detail || 'none');
-      // Don't null the pool - Render may need time to warm up
+      console.error('[DB] PG test failed:', e.code, e.message);
     });
   } catch(e) {
-    console.error('[DB] PostgreSQL init failed:', e.message);
+    console.error('[DB] PG init failed:', e.message);
   }
 })();
 
@@ -161,9 +164,10 @@ let pgPool = null;
   }
   const maxRetries = 10;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log('[DB] Table init attempt', attempt);
+    const client = await pgPool.connect();
     try {
-      console.log('[DB] Table init attempt', attempt);
-      await pgPool.query(`
+      await client.query(`
         CREATE TABLE IF NOT EXISTS users (
           id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
           referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
@@ -189,19 +193,17 @@ let pgPool = null;
         );
       `);
       console.log('[DB] Tables created successfully');
-      // Ensure all columns exist (migration-safe)
-      await pgPool.query(`
+      await client.query(`
         ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
       `);
       console.log('[DB] Columns verified');
-      // Create admin if not exists
-      const adminExists = await pgPool.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
+      const adminExists = await client.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
       if (adminExists.rowCount === 0) {
         const hash = await bcrypt.hash('haydar988522605gmail', 12);
-        await pgPool.query(
+        await client.query(
           'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
           [crypto.randomUUID(), 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
         );
@@ -211,59 +213,69 @@ let pgPool = null;
       }
       return;
     } catch(e) {
-      console.error('[DB] Init tables attempt', attempt, 'failed:', e.message);
+      console.error('[DB] Init tables attempt', attempt, 'failed:', e.message, e.code);
       if (attempt < maxRetries) {
         const delay = 3000 * attempt;
         console.log('[DB] Retrying in', delay, 'ms...');
         await new Promise(r => setTimeout(r, delay));
       }
+    } finally {
+      client.release();
     }
   }
 })();
 
 // All DB operations go through PostgreSQL - NO JSON fallback
-// For Render free tier, we create a fresh connection per request to avoid stale pool issues
-async function dbRead() {
+// Use Client per request for Render free tier reliability
+async function withDb(fn) {
   if (!pgPool) {
-    console.error('[DB READ] No pool!');
-    return { users: [], deposits: [], withdraws: [], transactions: [] };
+    console.error('[DB] No pool!');
+    return null;
   }
+  const client = await pgPool.connect();
   try {
-    const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-    const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
-    const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-    const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
-    return { users, deposits, withdraws, transactions };
+    const result = await fn(client);
+    return result;
   } catch(e) {
-    console.error('[DB READ] Error:', e.message, e.code);
-    // Try to reconnect the pool
-    try {
-      const testResult = await pgPool.query('SELECT 1');
-      console.log('[DB READ] Pool is alive, retry query...');
-      const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-      const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
-      const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-      const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
+    console.error('[DB] Query error:', e.message, e.code);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function dbRead() {
+  try {
+    return await withDb(async (client) => {
+      const { rows: users } = await client.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
+      const { rows: deposits } = await client.query('SELECT * FROM deposits ORDER BY created_at DESC');
+      const { rows: withdraws } = await client.query('SELECT * FROM withdraws ORDER BY created_at DESC');
+      const { rows: transactions } = await client.query('SELECT * FROM transactions ORDER BY created_at DESC');
       return { users, deposits, withdraws, transactions };
-    } catch(e2) {
-      console.error('[DB READ] Retry also failed:', e2.message);
-      return { users: [], deposits: [], withdraws: [], transactions: [] };
-    }
+    }) || { users: [], deposits: [], withdraws: [], transactions: [] };
+  } catch(e) {
+    console.error('[DB READ] Failed:', e.message);
+    return { users: [], deposits: [], withdraws: [], transactions: [] };
   }
 }
 
 async function dbWriteDb(d) {
   if (!pgPool) { console.error('[DB WRITE] No pool!'); return; }
-  for (const u of d.users) {
-    try {
-      await pgPool.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
-    } catch(e) { console.error('[DB WRITE USER ERROR]', u.username, e.message); }
-  }
-  for (const dep of d.deposits) {
-    try { await pgPool.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
-  }
-  for (const w of d.withdraws) {
-    try { await pgPool.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
+  const client = await pgPool.connect();
+  try {
+    for (const u of d.users) {
+      try {
+        await client.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
+      } catch(e) { console.error('[DB WRITE USER ERROR]', u.username, e.message); }
+    }
+    for (const dep of d.deposits) {
+      try { await client.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
+    }
+    for (const w of d.withdraws) {
+      try { await client.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
+    }
+  } finally {
+    client.release();
   }
 }
 
@@ -282,18 +294,24 @@ app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new D
 
 // ============ EMERGENCY: Create admin if missing ============
 app.get('/api/fix/admin', async (req, res) => {
+  if (!pgPool) return res.json({ success: false, error: 'No pool' });
   try {
-    const adminCheck = await pgPool.query('SELECT id, username, role FROM users WHERE username=$1', ['admin']);
-    if (adminCheck.rowCount > 0) {
-      return res.json({ success: true, message: 'Admin already exists', user: adminCheck.rows[0] });
+    const client = await pgPool.connect();
+    try {
+      const adminCheck = await client.query('SELECT id, username, role FROM users WHERE username=$1', ['admin']);
+      if (adminCheck.rowCount > 0) {
+        return res.json({ success: true, message: 'Admin already exists', user: adminCheck.rows[0] });
+      }
+      const hash = await bcrypt.hash('haydar988522605gmail', 12);
+      const id = crypto.randomUUID();
+      await client.query(
+        'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
+        [id, 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
+      );
+      return res.json({ success: true, message: 'Admin user created', id });
+    } finally {
+      client.release();
     }
-    const hash = await bcrypt.hash('haydar988522605gmail', 12);
-    const id = crypto.randomUUID();
-    await pgPool.query(
-      'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
-      [id, 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
-    );
-    return res.json({ success: true, message: 'Admin user created', id });
   } catch(e) {
     return res.json({ success: false, error: e.message, code: e.code });
   }
