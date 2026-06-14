@@ -41,8 +41,16 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 app.use(express.json({ limit: '10kb' }));
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*', methods: ['GET', 'POST'], credentials: true }));
 
-const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: { success: false, message: 'Too many requests.' }, standardHeaders: true, legacyHeaders: false });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: { success: false, message: 'Too many auth attempts.' }, standardHeaders: true, legacyHeaders: false });
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 60,
+  message: { success: false, message: 'Too many requests. Try again in 15 minutes.' },
+  standardHeaders: true, legacyHeaders: false
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10,
+  message: { success: false, message: 'Too many login attempts. Try again in 15 minutes.' },
+  standardHeaders: true, legacyHeaders: false
+});
 app.use(generalLimiter);
 
 // ============ CONFIGURATION ============
