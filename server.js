@@ -32,6 +32,78 @@ const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
+
+// ============ SECURITY: Attack Logger ============
+const LOG_FILE = path.join(__dirname, 'security.log');
+function logAttack(type, ip, details) {
+  const entry = `[${new Date().toISOString()}] ${type} | IP: ${ip} | ${details}\n`;
+  console.error('[SECURITY]', entry.trim());
+  try { fs.appendFileSync(LOG_FILE, entry); } catch {}
+}
+
+// ============ SECURITY: CSRF Protection ============
+// Generate CSRF token and set as cookie
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+    const token = crypto.randomBytes(32).toString('hex');
+    res.cookie('csrf_token', token, { httpOnly: true, sameSite: 'strict', secure: true, maxAge: 86400000 });
+    req.csrfToken = token;
+  }
+  next();
+});
+
+// Verify CSRF token on state-changing requests
+function checkCsrf(req, res, next) {
+  if (req.method === 'GET') return next();
+  const clientToken = req.headers['x-csrf-token'] || req.body?._csrf;
+  const cookieToken = req.cookies?.csrf_token;
+  if (req.path.startsWith('/api/auth/')) return next(); // Auth routes exempt (no session yet)
+  if (!clientToken || !cookieToken || clientToken !== cookieToken) {
+    logAttack('CSRF', req.ip || req.connection?.remoteAgent, `Path: ${req.path}`);
+    return res.status(403).json({ success: false, message: 'CSRF token invalid.' });
+  }
+  next();
+}
+
+// ============ SECURITY: Input Validation ============
+function validateUsername(username) {
+  if (typeof username !== 'string') return 'Username must be a string.';
+  if (username.length < 3 || username.length > 50) return 'Username must be 3-50 characters.';
+  if (!/^[a-zA-Z0-9_\-\u0600-\u06FF]+$/.test(username)) return 'Username contains invalid characters.';
+  return null;
+}
+function validatePassword(password) {
+  if (typeof password !== 'string') return 'Password must be a string.';
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (password.length > 128) return 'Password too long.';
+  return null;
+}
+
+// ============ SECURITY: Suspicious Activity Monitor ============
+const suspiciousIPs = new Map();
+app.use((req, res, next) => {
+  const ip = req.ip || req.connection?.remoteAddress;
+  // Log requests to auth endpoints
+  if (req.path.includes('/auth/') && req.method === 'POST') {
+    logAttack('AUTH_ATTEMPT', ip, `Path: ${req.path}, User-Agent: ${req.headers['user-agent']?.substring(0, 50) || 'unknown'}`);
+  }
+  // Detect rapid sequential requests (potential automation)
+  const record = suspiciousIPs.get(ip) || { count: 0, lastReq: 0 };
+  const now = Date.now();
+  if (now - record.lastReq < 100) { // Less than 100ms between requests
+    record.count++;
+    if (record.count > 20) {
+      logAttack('BOT_DETECTED', ip, `Rapid requests: ${record.count} in <2s`);
+      return res.status(429).json({ success: false, message: 'Suspicious activity detected.' });
+    }
+  } else {
+    record.count = 0;
+  }
+  record.lastReq = now;
+  suspiciousIPs.set(ip, record);
+  next();
+});
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err));
 process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', err));
@@ -67,6 +139,38 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('he
 const ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASS_HASH || '$2b$12$4DY6ysfcSJCjrt3RrzSIyOoW.Or0CwPbn777zKd0OdZWgaCzyotWa';
 const USDT_WALLET = process.env.USDT_WALLET || 'TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn';
+
+// ============ ACCOUNT LOCKOUT (anti brute-force) ============
+const loginAttempts = new Map(); // username -> { count, lockUntil }
+const LOCKOUT_MAX_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+
+function checkLockout(username) {
+  const record = loginAttempts.get(username);
+  if (!record) return { locked: false };
+  if (record.lockUntil && Date.now() < record.lockUntil) {
+    const remainingMin = Math.ceil((record.lockUntil - Date.now()) / 60000);
+    return { locked: true, remainingMin };
+  }
+  // Lock expired, reset
+  loginAttempts.delete(username);
+  return { locked: false };
+}
+
+function recordFailedLogin(username) {
+  const record = loginAttempts.get(username) || { count: 0, lockUntil: null };
+  record.count++;
+  if (record.count >= LOCKOUT_MAX_ATTEMPTS) {
+    record.lockUntil = Date.now() + LOCKOUT_DURATION_MS;
+    console.log(`[LOCKOUT] Account locked: ${username} for 30min (${record.count} failed attempts)`);
+  }
+  loginAttempts.set(username, record);
+  return record;
+}
+
+function recordSuccessfulLogin(username) {
+  loginAttempts.delete(username);
+}
 
 const ROOT_REFERRAL_CODES = ['BOOT00'];
 const COMM_ADMIN = 0.20;
@@ -342,8 +446,12 @@ app.get('/api/test/db', async (req, res) => {
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { username, password, referralCode } = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: 'Username and password required.' });
-    if (!referralCode) return res.status(400).json({ success: false, message: 'Referral code is required.' });
+    // Validate inputs
+    const usernameErr = validateUsername(username);
+    if (usernameErr) return res.status(400).json({ success: false, message: usernameErr });
+    const passwordErr = validatePassword(password);
+    if (passwordErr) return res.status(400).json({ success: false, message: passwordErr });
+    if (!referralCode || typeof referralCode !== 'string') return res.status(400).json({ success: false, message: 'Referral code is required.' });
     const db = await dbRead();
     if (db.users.find(u => u.username === username)) return res.status(400).json({ success: false, message: 'Username already exists.' });
     const isRootCode = ROOT_REFERRAL_CODES.includes(referralCode.toUpperCase());
@@ -363,11 +471,15 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ success: false, message: 'Username and password required.' });
+    // Check lockout
+    const lockStatus = checkLockout(username);
+    if (lockStatus.locked) return res.status(423).json({ success: false, message: `Account locked. Try again in ${lockStatus.remainingMin} minutes.` });
     const db = await dbRead();
     const user = db.users.find(u => u.username === username);
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+    if (!user) { recordFailedLogin(username); return res.status(401).json({ success: false, message: 'Invalid credentials.' }); }
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+    if (!valid) { recordFailedLogin(username); return res.status(401).json({ success: false, message: 'Invalid credentials.' }); }
+    recordSuccessfulLogin(username);
     const token = generateToken({ username: user.username, role: user.role || 'user' });
     res.json({ success: true, token, username: user.username, role: user.role || 'user' });
   } catch (err) { console.error('[LOGIN ERROR]', err); res.status(500).json({ success: false, message: err.message || 'Internal server error' }); }
@@ -377,14 +489,17 @@ app.post('/api/auth/admin/login', authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ success: false, message: 'Username and password required.' });
+    const lockStatus = checkLockout(username);
+    if (lockStatus.locked) return res.status(423).json({ success: false, message: `Account locked. Try again in ${lockStatus.remainingMin} minutes.` });
     const db = await dbRead();
     const user = db.users.find(u => u.username === username && u.role === 'admin');
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    if (!user) { recordFailedLogin(username); return res.status(401).json({ success: false, message: 'Invalid admin credentials.' }); }
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    if (!valid) { recordFailedLogin(username); return res.status(401).json({ success: false, message: 'Invalid admin credentials.' }); }
+    recordSuccessfulLogin(username);
     const token = generateToken({ username: user.username, role: 'admin' });
     res.json({ success: true, token, username: user.username, role: 'admin' });
-  } catch (err) { console.error('[ADMIN LOGIN ERROR]', err); res.status(500).json({ success: false, message: err.message || 'Internal server error' }); }
+  } catch (err) { console.error('[ADMIN LOGIN ERROR]', err); return res.status(500).json({ success: false, message: err.message || 'Internal server error' }); }
 });
 
 // ============ USER PROFILE ============
