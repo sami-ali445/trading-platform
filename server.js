@@ -132,17 +132,21 @@ let pgPool = null;
     const { Pool } = require('pg');
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: false,
+      ssl: { rejectUnauthorized: false },
       max: 3,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,
     });
     pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
-    pgPool.query('SELECT 1').then(() => {
-      console.log('[DB] PostgreSQL connected OK');
+    // Test connection with detailed logging
+    pgPool.query('SELECT 1 as test').then((result) => {
+      console.log('[DB] PostgreSQL connected OK, test:', JSON.stringify(result.rows[0]));
     }).catch(e => {
-      console.error('[DB] PostgreSQL test query failed:', e.message, e.code);
-      // Don't null the pool - it may recover
+      console.error('[DB] PostgreSQL test query failed!');
+      console.error('[DB] Error code:', e.code);
+      console.error('[DB] Error message:', e.message);
+      console.error('[DB] Error detail:', e.detail || 'none');
+      // Don't null the pool - Render may need time to warm up
     });
   } catch(e) {
     console.error('[DB] PostgreSQL init failed:', e.message);
@@ -151,10 +155,14 @@ let pgPool = null;
 
 // Initialize tables on startup (with retry for Render cold starts)
 (async function initTables() {
-  if (!pgPool) return;
-  const maxRetries = 5;
+  if (!pgPool) {
+    console.error('[DB] Skipping table init - no pool');
+    return;
+  }
+  const maxRetries = 10;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      console.log('[DB] Table init attempt', attempt);
       await pgPool.query(`
         CREATE TABLE IF NOT EXISTS users (
           id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
@@ -180,6 +188,7 @@ let pgPool = null;
           amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
         );
       `);
+      console.log('[DB] Tables created successfully');
       // Ensure all columns exist (migration-safe)
       await pgPool.query(`
         ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
@@ -187,6 +196,7 @@ let pgPool = null;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
       `);
+      console.log('[DB] Columns verified');
       // Create admin if not exists
       const adminExists = await pgPool.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
       if (adminExists.rowCount === 0) {
@@ -196,27 +206,50 @@ let pgPool = null;
           [crypto.randomUUID(), 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
         );
         console.log('[DB] Admin user created');
+      } else {
+        console.log('[DB] Admin user already exists');
       }
-      console.log('[DB] PostgreSQL tables initialized');
       return;
     } catch(e) {
       console.error('[DB] Init tables attempt', attempt, 'failed:', e.message);
-      if (attempt < maxRetries) await new Promise(r => setTimeout(r, 2000 * attempt));
+      if (attempt < maxRetries) {
+        const delay = 3000 * attempt;
+        console.log('[DB] Retrying in', delay, 'ms...');
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }
 })();
 
 // All DB operations go through PostgreSQL - NO JSON fallback
+// For Render free tier, we create a fresh connection per request to avoid stale pool issues
 async function dbRead() {
   if (!pgPool) {
     console.error('[DB READ] No pool!');
     return { users: [], deposits: [], withdraws: [], transactions: [] };
   }
-  const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-  const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
-  const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-  const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
-  return { users, deposits, withdraws, transactions };
+  try {
+    const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
+    const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
+    const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
+    const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
+    return { users, deposits, withdraws, transactions };
+  } catch(e) {
+    console.error('[DB READ] Error:', e.message, e.code);
+    // Try to reconnect the pool
+    try {
+      const testResult = await pgPool.query('SELECT 1');
+      console.log('[DB READ] Pool is alive, retry query...');
+      const { rows: users } = await pgPool.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
+      const { rows: deposits } = await pgPool.query('SELECT * FROM deposits ORDER BY created_at DESC');
+      const { rows: withdraws } = await pgPool.query('SELECT * FROM withdraws ORDER BY created_at DESC');
+      const { rows: transactions } = await pgPool.query('SELECT * FROM transactions ORDER BY created_at DESC');
+      return { users, deposits, withdraws, transactions };
+    } catch(e2) {
+      console.error('[DB READ] Retry also failed:', e2.message);
+      return { users: [], deposits: [], withdraws: [], transactions: [] };
+    }
+  }
 }
 
 async function dbWriteDb(d) {
