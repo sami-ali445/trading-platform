@@ -280,6 +280,25 @@ function requireAdmin(req, res, next) { if (req.user.role !== 'admin') return re
 // ============ HEALTH ============
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
 
+// ============ EMERGENCY: Create admin if missing ============
+app.get('/api/fix/admin', async (req, res) => {
+  try {
+    const adminCheck = await pgPool.query('SELECT id, username, role FROM users WHERE username=$1', ['admin']);
+    if (adminCheck.rowCount > 0) {
+      return res.json({ success: true, message: 'Admin already exists', user: adminCheck.rows[0] });
+    }
+    const hash = await bcrypt.hash('haydar988522605gmail', 12);
+    const id = crypto.randomUUID();
+    await pgPool.query(
+      'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id, 'admin', hash, 'ADMIN00', 'SYSTEM', 'admin']
+    );
+    return res.json({ success: true, message: 'Admin user created', id });
+  } catch(e) {
+    return res.json({ success: false, error: e.message, code: e.code });
+  }
+});
+
 // ============ DB TEST ============
 app.get('/api/test/db', async (req, res) => {
   try {
