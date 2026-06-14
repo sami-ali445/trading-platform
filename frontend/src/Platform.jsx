@@ -6,10 +6,10 @@ API.interceptors.request.use(c => { const t = localStorage.getItem('token'); if 
 API.interceptors.response.use(r => r, e => { if (e.response?.status === 401) { localStorage.clear(); window.location.reload(); } return Promise.reject(e); });
 
 const TIERS = {
-  bronze:  { key: 'bronze',  name: 'Bronze 🥉',  deposit: 10,   daily: 0.50,  cap: 4,   minDeposit: 10,  maxDeposit: 49,   color: '#CD7F32', bg: '#2a1f10' },
-  silver:  { key: 'silver',  name: 'Silver 🥈',  deposit: 50,   daily: 2.50,  cap: 8,   minDeposit: 50,  maxDeposit: 99,   color: '#C0C0C0', bg: '#1a1a2e' },
-  platinum:{ key: 'platinum',name: 'Platinum 🥇', deposit: 100,  daily: 5.00,  cap: 20,  minDeposit: 100, maxDeposit: 499,  color: '#E5E4E2', bg: '#1a1a3e' },
-  gold:    { key: 'gold',    name: 'Gold 💎',     deposit: 500,  daily: 60,    cap: 100, minDeposit: 500, maxDeposit: null, color: '#FFD700', bg: '#2a2a10' },
+  bronze:  { key: 'bronze',  name: 'Bronze 🥉',  deposit: 10,   daily: 0.29,  cap: 2,    minDeposit: 10,  maxDeposit: 49,   color: '#CD7F32', bg: '#2a1f10' },
+  silver:  { key: 'silver',  name: 'Silver 🥈',  deposit: 50,   daily: 1.43,  cap: 10,   minDeposit: 50,  maxDeposit: 99,   color: '#C0C0C0', bg: '#1a1a2e' },
+  platinum:{ key: 'platinum',name: 'Platinum 🥇', deposit: 100,  daily: 2.86,  cap: 20,   minDeposit: 100, maxDeposit: 499,  color: '#E5E4E2', bg: '#1a1a3e' },
+  gold:    { key: 'gold',    name: 'Gold 💎',     deposit: 500,  daily: 14.29, cap: 100,  minDeposit: 500, maxDeposit: null, color: '#FFD700', bg: '#2a2a10' },
 };
 
 /* ============ THEME CONTEXT ============ */
