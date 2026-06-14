@@ -132,7 +132,7 @@ let pgPool = null;
     const { Pool } = require('pg');
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: true,
+      ssl: false,
       max: 3,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,
