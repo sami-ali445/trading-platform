@@ -732,7 +732,21 @@ function AdminLogin({ onLogin, onNav }) {
 
 /* ============ DASHBOARD ============ */
 function Dashboard({ user: initUser, onLogout }) {
-  const [user, setUser] = useState(initUser);
+  // Normalize all numeric fields from API (PostgreSQL returns DECIMAL as strings)
+  const normalizedUser = {
+    ...initUser,
+    balance: Number(initUser?.balance ?? 0),
+    totalCommission: Number(initUser?.totalCommission ?? 0),
+    totalProfit: Number(initUser?.totalProfit ?? 0),
+    weeklyWithdrawn: Number(initUser?.weeklyWithdrawn ?? 0),
+    depositAmount: Number(initUser?.depositAmount ?? 0),
+    totalWithdrawnCycle: Number(initUser?.totalWithdrawnCycle ?? 0),
+    maxWithdrawal: Number(initUser?.maxWithdrawal ?? 0),
+    remainingWithdrawal: Number(initUser?.remainingWithdrawal ?? 0),
+    dailyProfit: Number(initUser?.dailyProfit ?? 0),
+    weeklyProfit: Number(initUser?.weeklyProfit ?? 0),
+  };
+  const [user, setUser] = useState(normalizedUser);
   const [tab, setTab] = useState('wallet');
   const [depAmount, setDepAmount] = useState('');
   const [depTx, setDepTx] = useState('');
@@ -744,7 +758,7 @@ function Dashboard({ user: initUser, onLogout }) {
   const [copied, setCopied] = useState(false);
   const [activating, setActivating] = useState(null);
 
-  const refresh = async () => { try { const r = await API.get('/user/profile'); if (r.data.success) setUser(r.data.user); } catch {} };
+  const refresh = async () => { try { const r = await API.get('/user/profile'); if (r.data.success) setUser({ ...r.data.user, balance: Number(r.data.user?.balance ?? 0), totalCommission: Number(r.data.user?.totalCommission ?? 0), totalProfit: Number(r.data.user?.totalProfit ?? 0), weeklyWithdrawn: Number(r.data.user?.weeklyWithdrawn ?? 0), depositAmount: Number(r.data.user?.depositAmount ?? 0), totalWithdrawnCycle: Number(r.data.user?.totalWithdrawnCycle ?? 0), maxWithdrawal: Number(r.data.user?.maxWithdrawal ?? 0), remainingWithdrawal: Number(r.data.user?.remainingWithdrawal ?? 0), dailyProfit: Number(r.data.user?.dailyProfit ?? 0), weeklyProfit: Number(r.data.user?.weeklyProfit ?? 0) }); } catch {} };
   const loadRefs = async () => { try { const r = await API.get('/user/referrals'); if (r.data.success) setRefs(r.data); } catch {} };
   const loadTxns = async () => { try { const r = await API.get('/user/transactions'); if (r.data.success) setTxns(r.data.transactions); } catch {} };
   useEffect(() => { refresh(); loadRefs(); loadTxns(); const i = setInterval(refresh, 15000); return () => clearInterval(i); }, []);
@@ -781,7 +795,7 @@ function Dashboard({ user: initUser, onLogout }) {
 
   const tier = user.activePlan ? TIERS[user.activePlan] : null;
   const canWd = user.canWithdraw && !user.windowExpired;
-  const weeklyRemaining = tier ? Number((tier.cap - (user.weeklyWithdrawn || 0)).toFixed(2)) : 0;
+  const weeklyRemaining = tier ? Number(((tier.cap || 0) - Number(user.weeklyWithdrawn ?? 0)).toFixed(2)) : 0;
 
   const tabs = [
     { key: 'wallet', label: '💰 المحفظة' }, { key: 'analytics', label: '📈 التحليلات' },
