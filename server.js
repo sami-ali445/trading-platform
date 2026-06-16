@@ -46,52 +46,29 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log('Test server on port ' + PORT));
 
 
-// ============ DATABASE (PostgreSQL — non-blocking) ============
-let pgPool = null;
+// ============ DATABASE (Supabase REST API — no pg needed) ============
+const SUPABASE_URL = "https://db.dilzpxhazjlmyniswyzm.supabase.co";
+const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTczNTAwMDAwMCwiZXhwIjoyMDUwMDAwMDB9.placeholder";
 
-(function initDB() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.log('[DB] No DATABASE_URL, skipping');
-    return;
-  }
-  try {
-    const pg = require('pg');
-    const { Pool } = pg;
-    pgPool = new Pool({
-      connectionString: dbUrl,
-      ssl: false,
-      max: 3,
-      connectionTimeoutMillis: 10000,
-    });
-    pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
-    pgPool.query('SELECT 1').then(() => {
-      console.log('[DB] PostgreSQL connected OK');
-    }).catch(e => {
-      console.error('[DB] PostgreSQL connection failed:', e.message);
-    });
-  } catch(e) {
-    console.error('[DB] Init error:', e.message);
-  }
-})();
-
-async function withDb(fn) {
-  if (!pgPool) return null;
-  const client = await pgPool.connect();
-  try { return await fn(client); }
-  catch(e) { console.error('[DB] Query error:', e.message); throw e; }
-  finally { client.release(); }
+async function supabaseFetch(path, options = {}) {
+  const url = SUPABASE_URL + path;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    ...options.headers
+  };
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) throw new Error('Supabase error: ' + res.status);
+  return res.json();
 }
 
 async function dbRead() {
   try {
-    return await withDb(async (client) => {
-      const { rows: users } = await client.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-      const { rows: deposits } = await client.query('SELECT * FROM deposits ORDER BY created_at DESC');
-      const { rows: withdraws } = await client.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-      const { rows: transactions } = await client.query('SELECT * FROM transactions ORDER BY created_at DESC');
-      return { users, deposits, withdraws, transactions };
-    }) || { users: [], deposits: [], withdraws: [], transactions: [] };
+    const users = await supabaseFetch('/rest/v1/users?select=*&order=created_at.desc');
+    const deposits = await supabaseFetch('/rest/v1/deposits?select=*&order=created_at.desc');
+    const withdraws = await supabaseFetch('/rest/v1/withdraws?select=*&order=created_at.desc');
+    return { users, deposits, withdraws, transactions: [] };
   } catch(e) {
     console.error('[DB READ] Failed:', e.message);
     return { users: [], deposits: [], withdraws: [], transactions: [] };
@@ -99,49 +76,55 @@ async function dbRead() {
 }
 
 async function dbWriteDb(d) {
-  if (!pgPool) return;
-  const client = await pgPool.connect();
   try {
-    for (const u of d.users) {
-      try {
-        await client.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
-      } catch(e) { console.error('[DB WRITE USER ERROR]', u.username, e.message); }
+    if (d.users) {
+      for (const u of d.users) {
+        await supabaseFetch('/rest/v1/users?username=eq.' + encodeURIComponent(u.username), {
+          method: 'PUT',
+          body: JSON.stringify(u)
+        });
+      }
     }
-    for (const dep of d.deposits) {
-      try { await client.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
+    if (d.deposits) {
+      for (const dep of d.deposits) {
+        await supabaseFetch('/rest/v1/deposits?id=eq.' + dep.id, {
+          method: 'PUT',
+          body: JSON.stringify(dep)
+        });
+      }
     }
-    for (const w of d.withdraws) {
-      try { await client.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
+    if (d.withdraws) {
+      for (const w of d.withdraws) {
+        await supabaseFetch('/rest/v1/withdraws?id=eq.' + w.id, {
+          method: 'PUT',
+          body: JSON.stringify(w)
+        });
+      }
     }
-  } finally { client.release(); }
+  } catch(e) {
+    console.error('[DB WRITE] Failed:', e.message);
+  }
 }
 
-// Initialize tables on startup (non-blocking)
-(async function initTables() {
-  if (!pgPool) return;
-  const client = await pgPool.connect();
+// Initialize admin user
+(async function initAdmin() {
   try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
-        referral_code VARCHAR(50) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
-        deposit_amount DECIMAL(12,2) DEFAULT 0, balance DECIMAL(12,2) DEFAULT 0,
-        total_commission DECIMAL(12,2) DEFAULT 0, weekly_withdrawn DECIMAL(12,2) DEFAULT 0,
-        week_start BIGINT DEFAULT 0, cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
-        total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(),
-        role VARCHAR(20) DEFAULT 'user'
-      );
-      CREATE TABLE IF NOT EXISTS deposits (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL, amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW());
-      CREATE TABLE IF NOT EXISTS withdraws (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW());
-      CREATE TABLE IF NOT EXISTS transactions (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL, amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW());
-    `);
-    console.log('[DB] Tables created/verified');
-    const adminExists = await client.query("SELECT 1 FROM users WHERE username=$1", ['admin']);
-    if (adminExists.rowCount === 0 && process.env.ADMIN_PASS_HASH) {
-      await client.query('INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), 'admin', process.env.ADMIN_PASS_HASH, 'ADMIN00', 'SYSTEM', 'admin']);
+    const admins = await supabaseFetch('/rest/v1/users?username=eq.admin&select=id');
+    if (admins.length === 0 && process.env.ADMIN_PASS_HASH) {
+      await supabaseFetch('/rest/v1/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: crypto.randomUUID(), username: 'admin', password: process.env.ADMIN_PASS_HASH,
+          referral_code: 'ADMIN00', referred_by: 'SYSTEM', role: 'admin',
+          active_plan: null, deposit_amount: 0, balance: 0, total_commission: 0,
+          weekly_withdrawn: 0, week_start: Date.now(), cycle_week: 1, cycle_start: 0,
+          total_withdrawn_cycle: 0, created_at: new Date().toISOString()
+        })
+      });
       console.log('[DB] Admin user created');
     }
-  } catch(e) { console.error('[DB] Table init error:', e.message); }
-  finally { client.release(); }
+  } catch(e) { console.error('[DB] Admin init error:', e.message); }
 })();
+
+console.log('[DB] Supabase REST API initialized');
 
