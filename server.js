@@ -158,11 +158,15 @@ function checkCsrf(req, res, next) {
 }
 
 // ============ SECURITY: Input Validation ============
-function validateUsername(username) {
-  if (typeof username !== 'string') return 'Username must be a string.';
-  if (username.length < 3 || username.length > 50) return 'Username must be 3-50 characters.';
-  if (!/^[a-zA-Z0-9_\-\u0600-\u06FF]+$/.test(username)) return 'Username contains invalid characters.';
-  return null;
+// Rate limiting
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 60,
+  message: { success: false, message: 'Too many requests.' },
+  standardHeaders: true, legacyHeaders: false
+});
+app.use('/api/', generalLimiter);
+app.use(checkCsrf);
+
 // Minimal routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.send('OK'));
