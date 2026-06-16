@@ -99,16 +99,19 @@ app.use(requireJsonContent);
 
 // ============ SECURITY: CORS - Strict Origin Whitelist (FIX #1) ============
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+// V5.5: Don't crash on missing ALLOWED_ORIGIN in production - just warn
 if (!ALLOWED_ORIGIN && process.env.NODE_ENV === 'production') {
-  console.error('[FATAL] ALLOWED_ORIGIN env var must be set in production!');
-  console.error('[FATAL] Set it to your exact domain, e.g. https://trading-platform-iglr.onrender.com');
-  process.exit(1);
+  console.error('[WARN] ALLOWED_ORIGIN not set in production - CORS will block all requests!');
 }
 const corsOptions = {
   origin: function (origin, callback) {
     // V5.4: In production, require Origin header (no curl/script bypass)
     if (!origin) {
       if (process.env.NODE_ENV === 'production') {
+        // V5.5: Don't crash on missing ALLOWED_ORIGIN, just block
+        if (!ALLOWED_ORIGIN) {
+          return callback(new Error('CORS policy: no origin'));
+        }
         logAttack('CORS_NO_ORIGIN', 'unknown', 'Blocked request with no Origin header');
         return callback(new Error('CORS policy: Origin header required'));
       }
