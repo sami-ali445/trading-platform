@@ -59,9 +59,6 @@ function logAttack(type, ip, details) {
 // ============ APP INIT (before middleware that uses app) ============
 const app = express();
 
-// V036: Health endpoint BEFORE all middleware (bypasses CORS/CSRF for monitoring)
-app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
-
 // ============ SECURITY: CSP Header (FIX #6) ============
 // Enable CSP with directives that match our app's needs
 app.use(helmet({
@@ -258,8 +255,12 @@ app.use(checkCsrf);
 // ============ CONFIGURATION ============
 const PORT = process.env.PORT || 4000;
 
-// FIX #9: JWT_SECRET - warn but don't crash (Render auto-generates via render.yaml)
+// FIX #9: JWT_SECRET is REQUIRED - no fallback in production
 if (!process.env.JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[FATAL] JWT_SECRET env var is required in production!');
+    process.exit(1);
+  }
   console.error('[WARN] JWT_SECRET not set! Using random value - tokens will change on restart!');
 }
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
@@ -356,163 +357,131 @@ function getTier(key) { return TIERS[key] || null; }
 function getWeeklyProfit(depositAmount) { return Number(depositAmount) * WEEKLY_PROFIT_PCT; }
 function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) / 7; }
 
-// ============ DATABASE (PostgreSQL only) ============
-let pgPool = null;
+// ============ DATABASE (JSON file-based — works everywhere, no external DB needed) ============
+const DB_FILE = path.join(__dirname, 'database.json');
+let db = { users: [], deposits: [], withdraws: [], transactions: [] };
 
-(function initDB() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error('[DB] FATAL: DATABASE_URL not set!');
-    return;
-  }
+function loadDB() {
   try {
-    const pg = require('pg');
-    const { Pool } = pg;
-    pgPool = new Pool({
-      connectionString: dbUrl,
-      ssl: false,
-      max: 2,
-      min: 0,
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 30000,
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
-    });
-    pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
-    pgPool.on('connect', () => console.log('[DB] New client connected'));
-    pgPool.query('SELECT 1 as test').then((result) => {
-      console.log('[DB] PostgreSQL connected OK');
-    }).catch(e => {
-      console.error('[DB] PG test failed:', e.code, e.message);
-    });
-  } catch(e) {
-    console.error('[DB] PG init failed:', e.message);
-  }
-})();
-
-// Initialize tables on startup (non-blocking)
-(async function initTables() {
-  if (!pgPool) {
-    console.error('[DB] Skipping table init - no pool');
-    return;
-  }
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log('[DB] Table init attempt', attempt);
-    const client = await pgPool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
-          referral_code VARCHAR(50) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
-          deposit_amount DECIMAL(12,2) DEFAULT 0,
-          balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
-          weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
-          cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
-          total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0,
-          created_at TIMESTAMP DEFAULT NOW(), role VARCHAR(20) DEFAULT 'user'
-        );
-        CREATE TABLE IF NOT EXISTS deposits (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
-          amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending',
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS withdraws (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL,
-          status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS transactions (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL,
-          amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
-      console.log('[DB] Tables created successfully');
-      await client.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
-      `);
-      console.log('[DB] Columns verified');
-      const adminExists = await client.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
-      if (adminExists.rowCount === 0) {
-        // Only create admin if ADMIN_PASS_HASH is set
-        if (ADMIN_PASSWORD_HASH) {
-          await client.query(
-            'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
-            [crypto.randomUUID(), 'admin', ADMIN_PASSWORD_HASH, 'ADMIN00', 'SYSTEM', 'admin']
-          );
-          console.log('[DB] Admin user created');
-        } else {
-          console.log('[DB] No ADMIN_PASS_HASH set - admin user not created');
-        }
-      } else {
-        console.log('[DB] Admin user already exists');
-      }
-      return;
-    } catch(e) {
-      console.error('[DB] Init tables attempt', attempt, 'failed:', e.message, e.code);
-      if (attempt < maxRetries) {
-        const delay = 2000 * attempt;
-        console.log('[DB] Retrying in', delay, 'ms...');
-        await new Promise(r => setTimeout(r, delay));
-      }
-    } finally {
-      client.release();
+    if (fs.existsSync(DB_FILE)) {
+      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      console.log('[DB] Loaded', db.users.length, 'users from JSON file');
+    } else {
+      console.log('[DB] No database file, starting fresh');
     }
-  }
-})();
-
-async function withDb(fn) {
-  if (!pgPool) {
-    console.error('[DB] No pool!');
-    return null;
-  }
-  const client = await pgPool.connect();
-  try {
-    const result = await fn(client);
-    return result;
   } catch(e) {
-    console.error('[DB] Query error:', e.message, e.code);
-    throw e;
-  } finally {
-    client.release();
+    console.error('[DB] Load error:', e.message);
+    db = { users: [], deposits: [], withdraws: [], transactions: [] };
   }
 }
 
-async function dbRead() {
-  try {
-    return await withDb(async (client) => {
-      const { rows: users } = await client.query('SELECT id, username, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
-      const { rows: deposits } = await client.query('SELECT * FROM deposits ORDER BY created_at DESC');
-      const { rows: withdraws } = await client.query('SELECT * FROM withdraws ORDER BY created_at DESC');
-      const { rows: transactions } = await client.query('SELECT * FROM transactions ORDER BY created_at DESC');
-      return { users, deposits, withdraws, transactions };
-    }) || { users: [], deposits: [], withdraws: [], transactions: [] };
-  } catch(e) {
-    console.error('[DB READ] Failed:', e.message);
-    return { users: [], deposits: [], withdraws: [], transactions: [] };
+function saveDB() {
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+  catch(e) { console.error('[DB] Save error:', e.message); }
+}
+
+// Initialize admin if hash is set
+function initAdmin() {
+  if (ADMIN_PASSWORD_HASH && !db.users.find(u => u.username === 'admin')) {
+    db.users.push({
+      id: crypto.randomUUID(), username: 'admin', password: ADMIN_PASSWORD_HASH,
+      referralCode: 'ADMIN00', referredBy: 'SYSTEM', role: 'admin',
+      activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0,
+      weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0,
+      totalWithdrawnCycle: 0, createdAt: new Date().toISOString()
+    });
+    saveDB();
+    console.log('[DB] Admin user created');
   }
 }
+
+loadDB();
+initAdmin();
+
+async function dbRead() { return { ...db }; }
 
 async function dbWriteDb(d) {
-  if (!pgPool) { console.error('[DB WRITE] No pool!'); return; }
-  const client = await pgPool.connect();
-  try {
-    for (const u of d.users) {
-      try {
-        await client.query(`INSERT INTO users (id, username, password, referral_code, referred_by, active_plan, deposit_amount, balance, total_commission, weekly_withdrawn, week_start, cycle_week, cycle_start, total_withdrawn_cycle, role, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (username) DO UPDATE SET balance=EXCLUDED.balance, active_plan=EXCLUDED.active_plan, deposit_amount=EXCLUDED.deposit_amount, total_commission=EXCLUDED.total_commission, weekly_withdrawn=EXCLUDED.weekly_withdrawn, week_start=EXCLUDED.week_start, cycle_week=EXCLUDED.cycle_week, cycle_start=EXCLUDED.cycle_start, total_withdrawn_cycle=EXCLUDED.total_withdrawn_cycle, role=EXCLUDED.role`, [u.id || crypto.randomUUID(), u.username, u.password, u.referralCode || u.referral_code, u.referredBy || u.referred_by, u.activePlan || u.active_plan, u.depositAmount || u.deposit_amount || 0, u.balance || 0, u.totalCommission || 0, u.weeklyWithdrawn || 0, u.weekStart || 0, u.cycleWeek || 1, u.cycleStart || 0, u.totalWithdrawnCycle || u.total_withdrawn_cycle || 0, u.role || 'user', u.createdAt || u.created_at || new Date().toISOString()]);
-      } catch(e) { console.error('[DB WRITE USER ERROR]', u.username, e.message); }
-    }
-    for (const dep of d.deposits) {
-      try { await client.query('INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [dep.id || crypto.randomUUID(), dep.username, dep.tier, dep.amount, dep.txId || dep.tx_id || 'manual', dep.status, dep.createdAt || dep.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE DEPOSIT ERROR]', e.message); }
-    }
-    for (const w of d.withdraws) {
-      try { await client.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
-    }
-  } finally {
-    client.release();
+  if (d.users) db.users = d.users;
+  if (d.deposits) db.deposits = d.deposits;
+  if (d.withdraws) db.withdraws = d.withdraws;
+  if (d.transactions) db.transactions = d.transactions;
+  saveDB();
+}
+
+// JSON-compatible admin operations
+async function adminApproveDepositJSON(depositId) {
+  const deposit = db.deposits.find(d => d.id === depositId);
+  if (!deposit) return { error: 'Deposit not found.' };
+  if (deposit.status !== 'pending') return { error: 'Already processed.' };
+  const tierKey = getTierKeyByAmount(parseFloat(deposit.amount));
+  deposit.status = 'approved';
+  const user = db.users.find(u => u.username === deposit.username);
+  if (!user) return { error: 'User not found.' };
+  user.balance = (parseFloat(user.balance) || 0) + parseFloat(deposit.amount);
+  user.depositAmount = parseFloat(deposit.amount);
+  if (tierKey) user.activePlan = tierKey;
+  if (!user.cycleStart || user.cycleStart === 0) {
+    user.cycleStart = Date.now();
+    user.cycleWeek = 1;
+    user.totalWithdrawnCycle = 0;
   }
+  // Commission: L1
+  if (user.referredBy && user.referredBy !== 'SYSTEM') {
+    const l1 = db.users.find(u => u.username === user.referredBy);
+    if (l1) {
+      const l1Comm = parseFloat(deposit.amount) * COMM_L1;
+      l1.balance = (parseFloat(l1.balance) || 0) + l1Comm;
+      l1.totalCommission = (parseFloat(l1.totalCommission) || 0) + l1Comm;
+      if (l1.referredBy && l1.referredBy !== 'SYSTEM') {
+        const l2 = db.users.find(u => u.username === l1.referredBy);
+        if (l2) {
+          const l2Comm = parseFloat(deposit.amount) * COMM_L2;
+          l2.balance = (parseFloat(l2.balance) || 0) + l2Comm;
+          l2.totalCommission = (parseFloat(l2.totalCommission) || 0) + l2Comm;
+        }
+      }
+    }
+  }
+  saveDB();
+  return { success: true, deposit };
+}
+
+async function adminRejectDepositJSON(depositId) {
+  const deposit = db.deposits.find(d => d.id === depositId);
+  if (!deposit) return { error: 'Deposit not found.' };
+  if (deposit.status !== 'pending') return { error: 'Already processed.' };
+  deposit.status = 'rejected';
+  saveDB();
+  return { success: true };
+}
+
+async function adminApproveWithdrawJSON(withdrawId) {
+  const withdraw = db.withdraws.find(w => w.id === withdrawId);
+  if (!withdraw) return { error: 'Withdraw not found.' };
+  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
+  const user = db.users.find(u => u.username === withdraw.username);
+  if (!user) return { error: 'User not found.' };
+  const balance = parseFloat(user.balance) || 0;
+  if (balance < parseFloat(withdraw.amount)) return { error: 'Insufficient user balance.' };
+  withdraw.status = 'approved';
+  user.balance = balance - parseFloat(withdraw.amount);
+  saveDB();
+  return { success: true, withdraw };
+}
+
+async function adminRejectWithdrawJSON(withdrawId) {
+  const withdraw = db.withdraws.find(w => w.id === withdrawId);
+  if (!withdraw) return { error: 'Withdraw not found.' };
+  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
+  withdraw.status = 'rejected';
+  const user = db.users.find(u => u.username === withdraw.username);
+  if (user) {
+    const amt = parseFloat(withdraw.amount);
+    user.weeklyWithdrawn = Math.max(0, (parseFloat(user.weeklyWithdrawn) || 0) - amt);
+    user.totalWithdrawnCycle = Math.max(0, (parseFloat(user.totalWithdrawnCycle) || 0) - amt);
+  }
+  saveDB();
+  return { success: true };
 }
 
 // ============ TOKEN BLACKLIST (V5.4 — V004 fix) ============
@@ -594,6 +563,9 @@ function requireAdmin(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only.' });
   next();
 }
+
+// ============ HEALTH ============
+app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
 
 // V5.4: Security audit endpoint removed (was temporary, V001/V002 fixed)
 
@@ -815,15 +787,10 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
     }
     const amt = Math.round(amount * 100) / 100;
 
-    // FIX #4: Use SELECT FOR UPDATE to lock the user row
-    const result = await withDb(async (client) => {
-      // Lock user row
-      const { rows: userRows } = await client.query(
-        'SELECT * FROM users WHERE username = $1 FOR UPDATE',
-        [req.user.username]
-      );
-      if (userRows.length === 0) return { error: 'User not found.' };
-      const user = userRows[0];
+    // FIX #4: Lock user row (JSON mode — no FOR UPDATE needed, single-threaded)
+    const result = await (async () => {
+      const user = db.users.find(u => u.username === req.user.username);
+      if (!user) return { error: 'User not found.' };
 
       if (!user.active_plan) return { error: 'No active plan. Deposit first.' };
 
@@ -833,18 +800,12 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
       const userTierLevel = tier ? tier.level : 0;
 
       // Check referrals
-      const { rows: allDirectDownline } = await client.query(
-        'SELECT * FROM users WHERE referred_by = $1',
-        [user.username]
-      );
-      const { rows: deposits } = await client.query(
-        'SELECT * FROM deposits WHERE username = ANY($1) AND status = $2',
-        [allDirectDownline.map(u => u.username), 'approved']
-      );
-      const approvedUsernames = new Set(deposits.map(d => d.username));
+      const allDirectDownline = db.users.filter(u => u.referredBy === user.username);
+      const approvedDeposits = db.deposits.filter(d => d.status === 'approved');
+      const approvedUsernames = new Set(approvedDeposits.map(d => d.username));
       const approvedDownline = allDirectDownline.filter(ref => {
-        if (!ref.active_plan) return false;
-        const refTier = getTier(ref.active_plan);
+        if (!ref.activePlan && !ref.active_plan) return false;
+        const refTier = getTier(ref.activePlan || ref.active_plan);
         if (!refTier) return false;
         return approvedUsernames.has(ref.username) && refTier.level >= userTierLevel;
       });
@@ -854,9 +815,9 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
       }
 
       // Cycle check
-      let cycleWeek = user.cycle_week || 1;
-      const cycleStart = user.cycle_start || 0;
-      let totalWithdrawnCycle = parseFloat(user.total_withdrawn_cycle) || 0;
+      let cycleWeek = user.cycleWeek || user.cycle_week || 1;
+      const cycleStart = user.cycleStart || user.cycle_start || 0;
+      let totalWithdrawnCycle = parseFloat(user.totalWithdrawnCycle || user.total_withdrawn_cycle) || 0;
       if (cycleStart > 0) { const weekMs = 7 * 24 * 60 * 60 * 1000; const elapsed = Date.now() - cycleStart; cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1); }
       if (cycleWeek > CYCLE_WEEKS) return { error: `Cycle expired! ${CYCLE_WEEKS} weeks completed. Re-deposit and bring 3 new referrals.`, code: 'CYCLE_EXPIRED' };
 
@@ -866,9 +827,9 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
       }
 
       // Weekly cap
-      const weekElapsed = Date.now() - (user.week_start || 0);
+      const weekElapsed = Date.now() - (user.weekStart || user.week_start || 0);
       const weekMs = 7 * 24 * 60 * 60 * 1000;
-      let weeklyWithdrawn = parseFloat(user.weekly_withdrawn) || 0;
+      let weeklyWithdrawn = parseFloat(user.weeklyWithdrawn || user.weekly_withdrawn) || 0;
       if (weekElapsed > weekMs) { weeklyWithdrawn = 0; }
       if (weeklyWithdrawn + amt > weeklyProfit) {
         return { error: `Weekly cap exceeded. Remaining: $${(weeklyProfit - weeklyWithdrawn).toFixed(2)}`, code: 'WEEKLY_CAP', remaining: +(weeklyProfit - weeklyWithdrawn).toFixed(2) };
@@ -882,19 +843,16 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
 
       // Create withdraw record
       const withdrawId = crypto.randomUUID();
-      await client.query(
-        'INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,NOW())',
-        [withdrawId, user.username, amt, 'pending']
-      );
+      db.withdraws.push({ id: withdrawId, username: user.username, amount: amt, status: 'pending', createdAt: new Date().toISOString() });
 
       // Update user
-      await client.query(
-        'UPDATE users SET weekly_withdrawn = $1, total_withdrawn_cycle = $2, cycle_week = $3 WHERE username = $4',
-        [weeklyWithdrawn + amt, totalWithdrawnCycle + amt, cycleWeek, user.username]
-      );
+      user.weeklyWithdrawn = weeklyWithdrawn + amt;
+      user.totalWithdrawnCycle = totalWithdrawnCycle + amt;
+      user.cycleWeek = cycleWeek;
+      saveDB();
 
       return { success: true, withdrawId };
-    });
+    })();
 
     if (result.error) {
       return res.status(result.code === 'INSUFFICIENT_BALANCE' ? 400 : result.code === 'REFERRAL_LOCK' ? 403 : 400).json({ success: false, message: result.error, code: result.code, ...result });
@@ -1047,9 +1005,7 @@ app.get('/api/admin/deposits', authenticateToken, requireAdmin, async (req, res)
 
 app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await withDb(async (client) => {
-      return await adminApproveDeposit(client, req.params.id);
-    });
+    const result = await adminApproveDepositJSON(req.params.id);
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     logAdminAction('APPROVE_DEPOSIT', req.user.username, `Deposit: ${req.params.id}, User: ${result.deposit.username}, Amount: $${result.deposit.amount}`);
     res.json({ success: true, message: 'Deposit approved.', deposit: result.deposit });
@@ -1058,9 +1014,7 @@ app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, asy
 
 app.post('/api/admin/deposits/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await withDb(async (client) => {
-      return await adminRejectDeposit(client, req.params.id);
-    });
+    const result = await adminRejectDepositJSON(req.params.id);
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     logAdminAction('REJECT_DEPOSIT', req.user.username, `Deposit: ${req.params.id}`);
     res.json({ success: true, message: 'Deposit rejected.' });
@@ -1074,9 +1028,7 @@ app.get('/api/admin/withdraws', authenticateToken, requireAdmin, async (req, res
 
 app.post('/api/admin/withdraws/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await withDb(async (client) => {
-      return await adminApproveWithdraw(client, req.params.id);
-    });
+    const result = await adminApproveWithdrawJSON(req.params.id);
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     logAdminAction('APPROVE_WITHDRAW', req.user.username, `Withdraw: ${req.params.id}, User: ${result.withdraw.username}, Amount: $${result.withdraw.amount}`);
     res.json({ success: true, message: 'Withdraw approved.', withdraw: result.withdraw });
@@ -1085,9 +1037,7 @@ app.post('/api/admin/withdraws/:id/approve', authenticateToken, requireAdmin, as
 
 app.post('/api/admin/withdraws/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await withDb(async (client) => {
-      return await adminRejectWithdraw(client, req.params.id);
-    });
+    const result = await adminRejectWithdrawJSON(req.params.id);
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     logAdminAction('REJECT_WITHDRAW', req.user.username, `Withdraw: ${req.params.id}`);
     res.json({ success: true, message: 'Withdraw rejected.' });
@@ -1105,15 +1055,11 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
     const { id, type, action } = req.body;
     let result;
     if (type === 'deposit') {
-      result = await withDb(async (client) => {
-        if (action === 'Approve') return await adminApproveDeposit(client, id);
-        return await adminRejectDeposit(client, id);
-      });
+      if (action === 'Approve') result = await adminApproveDepositJSON(id);
+      else result = await adminRejectDepositJSON(id);
     } else if (type === 'withdraw') {
-      result = await withDb(async (client) => {
-        if (action === 'Approve') return await adminApproveWithdraw(client, id);
-        return await adminRejectWithdraw(client, id);
-      });
+      if (action === 'Approve') result = await adminApproveWithdrawJSON(id);
+      else result = await adminRejectWithdrawJSON(id);
     } else {
       return res.status(400).json({ success: false, message: 'Invalid type.' });
     }
