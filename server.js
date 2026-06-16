@@ -36,8 +36,32 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
+
+// ============ SECURITY: Attack Logger ============
+const LOG_FILE = path.join(__dirname, 'security.log');
+// V025: Rate limit disk writes to max 100 per minute
+let logAttackWrites = 0;
+let logAttackResetTime = Date.now();
+function logAttack(type, ip, details) {
+  const entry = `[${new Date().toISOString()}] ${type} | IP: ${ip} | ${details}\n`;
+  console.error('[SECURITY]', entry.trim());
+  // V025: Rate limit - max 100 disk writes per minute
+  const now = Date.now();
+  if (now - logAttackResetTime >= 60000) {
+    logAttackWrites = 0;
+    logAttackResetTime = now;
+  }
+  if (logAttackWrites >= 100) return; // Silently drop writes over limit
+  logAttackWrites++;
+  try { fs.appendFileSync(LOG_FILE, entry); } catch {}
+}
+
+// ============ APP INIT (before middleware that uses app) ============
 const app = express();
+
+// ============ SECURITY: CSP Header (FIX #6) ============
+// Minimal routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.send('OK'));
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, '0.0.0.0', () => console.log('Imports-only test on port ' + PORT));
+app.listen(PORT, '0.0.0.0', () => console.log('Test on port ' + PORT));
