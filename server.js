@@ -1,5 +1,15 @@
 /**
- * Trading Platform Server v5.4 — 9-Tier Dynamic Pyramid (7-Week Cycle)
+ * Trading Platform Server v5.5 — 9-Tier Dynamic Pyramid (7-Week Cycle)
+ *
+ * SECURITY FIXES v5.5:
+ * 1. V016: Token blacklist hard cap at 10,000 entries with LRU eviction
+ * 2. V024: Removed 'password' field from /api/admin/users SELECT query
+ * 3. V026: Updated CREATE TABLE referral_code to VARCHAR(50), removed redundant ALTER TABLE
+ * 4. V027: Removed /api/test/db endpoint entirely
+ * 5. V020+V023: Added HSTS header (maxAge: 31536000, includeSubDomains, preload)
+ * 6. V018: Removed hardcoded default for USDT_WALLET (now empty string fallback)
+ * 7. V025: Added rate limiting to logAttack (max 100 disk writes/minute)
+ * 8. V019: Moved generalLimiter to apply only to /api/ routes (not static files)
  *
  * SECURITY FIXES v5.4:
  * 1. Removed /api/admin/security-audit endpoint (was temporary)
@@ -29,9 +39,20 @@ const fs = require('fs');
 
 // ============ SECURITY: Attack Logger ============
 const LOG_FILE = path.join(__dirname, 'security.log');
+// V025: Rate limit disk writes to max 100 per minute
+let logAttackWrites = 0;
+let logAttackResetTime = Date.now();
 function logAttack(type, ip, details) {
   const entry = `[${new Date().toISOString()}] ${type} | IP: ${ip} | ${details}\n`;
   console.error('[SECURITY]', entry.trim());
+  // V025: Rate limit - max 100 disk writes per minute
+  const now = Date.now();
+  if (now - logAttackResetTime >= 60000) {
+    logAttackWrites = 0;
+    logAttackResetTime = now;
+  }
+  if (logAttackWrites >= 100) return; // Silently drop writes over limit
+  logAttackWrites++;
   try { fs.appendFileSync(LOG_FILE, entry); } catch {}
 }
 
@@ -56,6 +77,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: "same-origin" },
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
 }));
 
 // V5.4: Content-Type validation middleware (V008 fix)
@@ -224,7 +246,7 @@ const withdrawLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
   keyGenerator: (req) => req.user?.username || req.ip
 });
-app.use(generalLimiter);
+app.use('/api/', generalLimiter);
 app.use(checkCsrf);
 
 // ============ CONFIGURATION ============
@@ -243,7 +265,7 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('he
 const ADMIN_USERNAME = process.env.ADMIN_USER || 'admin';
 // FIX #10: No hardcoded hash - must be set via env var
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASS_HASH;
-const USDT_WALLET = process.env.USDT_WALLET || 'TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn';
+const USDT_WALLET = process.env.USDT_WALLET || '';
 
 // ============ ACCOUNT LOCKOUT (anti brute-force) ============
 const LOCKOUT_MAX_ATTEMPTS = 5;
@@ -380,7 +402,7 @@ let pgPool = null;
       await client.query(`
         CREATE TABLE IF NOT EXISTS users (
           id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
-          referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
+          referral_code VARCHAR(50) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
           deposit_amount DECIMAL(12,2) DEFAULT 0,
           balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
           weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
@@ -408,7 +430,6 @@ let pgPool = null;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
-        ALTER TABLE users ALTER COLUMN referral_code TYPE VARCHAR(50);
       `);
       console.log('[DB] Columns verified');
       const adminExists = await client.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
@@ -460,7 +481,7 @@ async function withDb(fn) {
 async function dbRead() {
   try {
     return await withDb(async (client) => {
-      const { rows: users } = await client.query('SELECT id, username, password, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
+      const { rows: users } = await client.query('SELECT id, username, referral_code, referred_by, active_plan, COALESCE(deposit_amount,0) as deposit_amount, balance, total_commission, weekly_withdrawn, week_start, COALESCE(cycle_week,1) as cycle_week, COALESCE(cycle_start,0) as cycle_start, COALESCE(total_withdrawn_cycle,0) as total_withdrawn_cycle, role, created_at FROM users ORDER BY created_at DESC');
       const { rows: deposits } = await client.query('SELECT * FROM deposits ORDER BY created_at DESC');
       const { rows: withdraws } = await client.query('SELECT * FROM withdraws ORDER BY created_at DESC');
       const { rows: transactions } = await client.query('SELECT * FROM transactions ORDER BY created_at DESC');
@@ -508,15 +529,30 @@ function isTokenBlacklisted(token) {
   return tokenBlacklist.has(token);
 }
 
+const MAX_BLACKLIST_SIZE = 10000;
+
 function blacklistToken(token) {
   try {
     const decoded = jwt.decode(token);
     if (decoded && decoded.exp) {
+      // V016: Evict oldest entries if at capacity
+      if (tokenBlacklist.size >= MAX_BLACKLIST_SIZE) {
+        const oldestKey = tokenBlacklist.keys().next().value;
+        if (oldestKey !== undefined) tokenBlacklist.delete(oldestKey);
+      }
       tokenBlacklist.set(token, decoded.exp * 1000); // exp is in seconds
     } else {
+      if (tokenBlacklist.size >= MAX_BLACKLIST_SIZE) {
+        const oldestKey = tokenBlacklist.keys().next().value;
+        if (oldestKey !== undefined) tokenBlacklist.delete(oldestKey);
+      }
       tokenBlacklist.set(token, Date.now() + 24 * 60 * 60 * 1000); // fallback 24h
     }
   } catch(e) {
+    if (tokenBlacklist.size >= MAX_BLACKLIST_SIZE) {
+      const oldestKey = tokenBlacklist.keys().next().value;
+      if (oldestKey !== undefined) tokenBlacklist.delete(oldestKey);
+    }
     tokenBlacklist.set(token, Date.now() + 24 * 60 * 60 * 1000);
   }
 }
@@ -561,19 +597,6 @@ function requireAdmin(req, res, next) {
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
 
 // V5.4: Security audit endpoint removed (was temporary, V001/V002 fixed)
-
-// ============ DB TEST ============
-app.get('/api/test/db', async (req, res) => {
-  try {
-    if (!pgPool) {
-      return res.json({ mode: 'NO_DB', error: 'PostgreSQL pool not initialized', warning: 'DATABASE_URL not set!' });
-    }
-    const result = await pgPool.query('SELECT COUNT(*) FROM users');
-    return res.json({ mode: 'PostgreSQL', userCount: parseInt(result.rows[0].count), status: 'connected' });
-  } catch(e) {
-    return res.json({ mode: 'PostgreSQL', error: e.message, status: 'error' });
-  }
-});
 
 // ============ AUTH ============
 app.post('/api/auth/register', authLimiter, async (req, res) => {
@@ -1112,5 +1135,5 @@ app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeader
 app.use((req, res, next) => { if (!req.path.startsWith('/api/')) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.sendFile(path.join(PUBLIC_DIR, 'index.html')); } else { next(); } });
 
 // ============ START ============
-const server = app.listen(PORT, '0.0.0.0', () => { console.log('Trading Platform v5.3 running on port ' + PORT); });
+const server = app.listen(PORT, '0.0.0.0', () => { console.log('Trading Platform v5.5 running on port ' + PORT); });
 server.keepAliveTimeout = 65000; server.headersTimeout = 66000;
