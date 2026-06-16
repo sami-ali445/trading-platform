@@ -34,7 +34,6 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { ipKeyGenerator } = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -1009,6 +1008,11 @@ async function adminRejectWithdraw(client, withdrawId) {
 }
 
 // ============ ADMIN ENDPOINTS ============
+// V032: Log all admin actions for audit trail
+function logAdminAction(action, adminUser, details) {
+  logAttack('ADMIN_ACTION', 'admin', `Admin: ${adminUser} | Action: ${action} | ${details}`);
+}
+
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const db = await dbRead();
@@ -1051,6 +1055,7 @@ app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, asy
       return await adminApproveDeposit(client, req.params.id);
     });
     if (result.error) return res.status(400).json({ success: false, message: result.error });
+    logAdminAction('APPROVE_DEPOSIT', req.user.username, `Deposit: ${req.params.id}, User: ${result.deposit.username}, Amount: $${result.deposit.amount}`);
     res.json({ success: true, message: 'Deposit approved.', deposit: result.deposit });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1061,6 +1066,7 @@ app.post('/api/admin/deposits/:id/reject', authenticateToken, requireAdmin, asyn
       return await adminRejectDeposit(client, req.params.id);
     });
     if (result.error) return res.status(400).json({ success: false, message: result.error });
+    logAdminAction('REJECT_DEPOSIT', req.user.username, `Deposit: ${req.params.id}`);
     res.json({ success: true, message: 'Deposit rejected.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1076,6 +1082,7 @@ app.post('/api/admin/withdraws/:id/approve', authenticateToken, requireAdmin, as
       return await adminApproveWithdraw(client, req.params.id);
     });
     if (result.error) return res.status(400).json({ success: false, message: result.error });
+    logAdminAction('APPROVE_WITHDRAW', req.user.username, `Withdraw: ${req.params.id}, User: ${result.withdraw.username}, Amount: $${result.withdraw.amount}`);
     res.json({ success: true, message: 'Withdraw approved.', withdraw: result.withdraw });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1086,6 +1093,7 @@ app.post('/api/admin/withdraws/:id/reject', authenticateToken, requireAdmin, asy
       return await adminRejectWithdraw(client, req.params.id);
     });
     if (result.error) return res.status(400).json({ success: false, message: result.error });
+    logAdminAction('REJECT_WITHDRAW', req.user.username, `Withdraw: ${req.params.id}`);
     res.json({ success: true, message: 'Withdraw rejected.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1114,6 +1122,7 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
       return res.status(400).json({ success: false, message: 'Invalid type.' });
     }
     if (result.error) return res.status(400).json({ success: false, message: result.error });
+    logAdminAction(action.toUpperCase() + `_${type.toUpperCase()}`, req.user.username, `ID: ${id}`);
     res.json({ success: true, message: action + ' successful.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
