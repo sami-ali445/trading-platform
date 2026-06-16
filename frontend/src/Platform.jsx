@@ -2,9 +2,22 @@ import React, { useState, useEffect, useRef, useCallback, createContext, useCont
 import axios from 'axios';
 
 const API = axios.create({ baseURL: '/api', withCredentials: true });
-// JWT + CSRF token interceptor
-API.interceptors.request.use(c => { const t = localStorage.getItem('token'); if (t) c.headers.Authorization = `Bearer ${t}`; const csrf = localStorage.getItem('csrf_token'); if (csrf) c.headers['X-CSRF-Token'] = csrf; return c; });
-API.interceptors.response.use(r => { const csrf = r.headers['x-csrf-token']; if (csrf) localStorage.setItem('csrf_token', csrf); return r; }, e => { if (e.response?.status === 401) { localStorage.clear(); window.location.reload(); } return Promise.reject(e); });
+// JWT is now in httpOnly cookie (set by server). CSRF token interceptor.
+API.interceptors.request.use(c => {
+  // Read CSRF token from cookie (not localStorage - more secure)
+  const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
+  if (csrfMatch) c.headers['X-CSRF-Token'] = csrfMatch[1];
+  return c;
+});
+API.interceptors.response.use(r => {
+  // Update CSRF token from response header
+  const csrf = r.headers['x-csrf-token'];
+  if (csrf) document.cookie = `csrf_token=${csrf}; path=/; SameSite=Strict; Secure`;
+  return r;
+}, e => {
+  if (e.response?.status === 401) { window.location.reload(); }
+  return Promise.reject(e);
+});
 
 const TIERS = {
   bronze:  { key: 'bronze',  name: 'Bronze 🥉',  deposit: 10,   daily: 0.29,  cap: 2,    minDeposit: 10,  maxDeposit: 49,   color: '#CD7F32', bg: '#2a1f10' },
@@ -588,16 +601,24 @@ function ThemeToggle() {
 export default function Platform() {
   const [view, setView] = useState('landing');
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('user')); } catch { return null; } });
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  useEffect(() => { if (token && user) setView(user.isAdmin ? 'admin' : 'dashboard'); }, [token, user]);
-  const logout = () => { localStorage.clear(); setToken(null); setUser(null); setView('landing'); }
+  // Token is now in httpOnly cookie - we just track login state
+  const [isLoggedIn, setIsLoggedIn] = useState(!!document.cookie.match(/auth_token=/));
+  useEffect(() => { if (isLoggedIn && user) setView(user.isAdmin ? 'admin' : 'dashboard'); }, [isLoggedIn, user]);
+  const logout = () => {
+    // Call server to clear cookie
+    API.post('/auth/logout').catch(() => {});
+    localStorage.removeItem('user');
+    setIsLoggedIn(false);
+    setUser(null);
+    setView('landing');
+  }
   return (
     <ThemeProvider>
       <ToastProvider>
         {view === 'landing' && <><Landing onNav={setView} /><WithdrawalTicker /></>}
-        {view === 'login' && <Login onLogin={(t, u) => { setToken(t); setUser(u); }} onNav={setView} />}
+        {view === 'login' && <Login onLogin={(t, u) => { setIsLoggedIn(true); setUser(u); }} onNav={setView} />}
         {view === 'register' && <Register onNav={setView} />}
-        {view === 'admin-login' && <AdminLogin onLogin={(t, u) => { setToken(t); setUser(u); }} onNav={setView} />}
+        {view === 'admin-login' && <AdminLogin onLogin={(t, u) => { setIsLoggedIn(true); setUser(u); }} onNav={setView} />}
         {view === 'dashboard' && user && <><Dashboard user={user} onLogout={logout} /><WithdrawalTicker /></>}
         {view === 'admin' && user && <Admin onLogout={logout} />}
         {!['landing','login','register','admin-login','dashboard','admin'].includes(view) && <><Landing onNav={setView} /><WithdrawalTicker /></>}
@@ -667,8 +688,7 @@ function Login({ onLogin, onNav }) {
     try {
       const r = await API.post('/auth/login', { username: u, password: p });
       if (r.data.success) {
-        localStorage.setItem('token', r.data.token);
-        // Fetch full user profile after login to get complete data (balance, plan, etc.)
+        // Token is now in httpOnly cookie set by server
         try {
           const prof = await API.get('/user/profile');
           if (prof.data.success) {
@@ -725,7 +745,7 @@ function Register({ onNav }) {
 /* ============ ADMIN LOGIN ============ */
 function AdminLogin({ onLogin, onNav }) {
   const [u, setU] = useState(''); const [p, setP] = useState(''); const [load, setLoad] = useState(false); const [err, setErr] = useState('');
-  const go = async () => { setLoad(true); setErr(''); try { const r = await API.post('/auth/admin/login', { username: u, password: p }); if (r.data.success) { localStorage.setItem('token', r.data.token); localStorage.setItem('user', JSON.stringify({ username: 'admin', isAdmin: true })); onLogin(r.data.token, { username: 'admin', isAdmin: true }); } } catch (e) { setErr(e.response?.data?.message || 'خطأ!'); } setLoad(false); };
+  const go = async () => { setLoad(true); setErr(''); try { const r = await API.post('/auth/admin/login', { username: u, password: p }); if (r.data.success) { localStorage.setItem('user', JSON.stringify({ username: 'admin', isAdmin: true })); onLogin(r.data.token, { username: 'admin', isAdmin: true }); } } catch (e) { setErr(e.response?.data?.message || 'خطأ!'); } setLoad(false); };
   return <FormCard title="🔒 لوحة الإدارة" err={err} footer={<button style={s.bb} onClick={() => onNav('landing')}>← العودة</button>}>
     <input style={s.inp} placeholder="اسم المدير" value={u} onChange={e => setU(e.target.value)} />
     <input style={s.inp} type="password" placeholder="كلمة مرور المدير" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
