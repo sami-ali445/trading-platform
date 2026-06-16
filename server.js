@@ -128,6 +128,36 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+// ============ SECURITY: CSRF Protection (FIX #8 - rotate per request) ============
+app.use((req, res, next) => {
+  // Generate fresh CSRF token on EVERY request
+  const token = crypto.randomBytes(32).toString('hex');
+  res.cookie('csrf_token', token, {
+    httpOnly: false,  // Frontend needs to read it
+    sameSite: 'strict',
+    secure: true,
+    maxAge: 3600000  // 1 hour
+  });
+  res.set('X-CSRF-Token', token);
+  req.csrfToken = token;
+  next();
+});
+
+// Verify CSRF token on state-changing requests
+function checkCsrf(req, res, next) {
+  if (req.method === 'GET') return next();
+  const clientToken = req.headers['x-csrf-token'] || req.body?._csrf;
+  const cookieToken = req.cookies?.csrf_token;
+  if (req.path.startsWith('/api/auth/')) return next(); // Auth routes exempt
+  if (!clientToken && !cookieToken) return next();
+  if (!clientToken || !cookieToken || clientToken !== cookieToken) {
+    logAttack('CSRF', req.ip || req.connection?.remoteAddress, `Path: ${req.path}`);
+    return res.status(403).json({ success: false, message: 'CSRF token invalid.' });
+  }
+  next();
+}
+
+// ============ SECURITY: Input Validation ============
 // Minimal routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.send('OK'));
