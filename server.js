@@ -785,106 +785,16 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ============ ADMIN: Shared Functions (FIX #14 - no duplicated logic) ============
-async function adminApproveDeposit(client, depositId) {
-  const { rows: depRows } = await client.query('SELECT * FROM deposits WHERE id = $1 FOR UPDATE', [depositId]);
-  if (depRows.length === 0) return { error: 'Deposit not found.' };
-  const deposit = depRows[0];
-  if (deposit.status !== 'pending') return { error: 'Already processed.' };
-
-  const tierKey = getTierKeyByAmount(parseFloat(deposit.amount));
-  deposit.status = 'approved';
-
-  // Lock and update user
-  const { rows: userRows } = await client.query('SELECT * FROM users WHERE username = $1 FOR UPDATE', [deposit.username]);
-  if (userRows.length === 0) return { error: 'User not found.' };
-  const user = userRows[0];
-
-  const newBalance = (parseFloat(user.balance) || 0) + parseFloat(deposit.amount);
-  await client.query(
-    'UPDATE users SET balance = $1, deposit_amount = $2, active_plan = COALESCE($3, active_plan), cycle_start = CASE WHEN cycle_start = 0 OR cycle_start IS NULL THEN EXTRACT(EPOCH FROM NOW()) * 1000 ELSE cycle_start END, cycle_week = CASE WHEN cycle_start = 0 OR cycle_start IS NULL THEN 1 ELSE cycle_week END, total_withdrawn_cycle = CASE WHEN cycle_start = 0 OR cycle_start IS NULL THEN 0 ELSE total_withdrawn_cycle END WHERE username = $4',
-    [newBalance, parseFloat(deposit.amount), tierKey, user.username]
-  );
-
-  // Update deposit status
-  await client.query('UPDATE deposits SET status = $1 WHERE id = $2', ['approved', depositId]);
-
-  // Commission: L1
-  if (user.referred_by && user.referred_by !== 'SYSTEM') {
-    const { rows: l1Rows } = await client.query('SELECT * FROM users WHERE username = $1 FOR UPDATE', [user.referred_by]);
-    if (l1Rows.length > 0) {
-      const l1 = l1Rows[0];
-      const l1Comm = parseFloat(deposit.amount) * COMM_L1;
-      await client.query(
-        'UPDATE users SET balance = COALESCE(balance,0) + $1, total_commission = COALESCE(total_commission,0) + $1 WHERE username = $2',
-        [l1Comm, l1.username]
-      );
-      // Commission: L2
-      if (l1.referred_by && l1.referred_by !== 'SYSTEM') {
-        const { rows: l2Rows } = await client.query('SELECT * FROM users WHERE username = $1 FOR UPDATE', [l1.referred_by]);
-        if (l2Rows.length > 0) {
-          const l2Comm = parseFloat(deposit.amount) * COMM_L2;
-          await client.query(
-            'UPDATE users SET balance = COALESCE(balance,0) + $1, total_commission = COALESCE(total_commission,0) + $1 WHERE username = $2',
-            [l2Comm, l2Rows[0].username]
-          );
-        }
-      }
-    }
-  }
-
-  return { success: true, deposit };
-}
-
-async function adminRejectDeposit(client, depositId) {
-  const { rows: depRows } = await client.query('SELECT * FROM deposits WHERE id = $1 FOR UPDATE', [depositId]);
-  if (depRows.length === 0) return { error: 'Deposit not found.' };
-  const deposit = depRows[0];
-  if (deposit.status !== 'pending') return { error: 'Already processed.' };
-  await client.query('UPDATE deposits SET status = $1 WHERE id = $2', ['rejected', depositId]);
-  return { success: true };
-}
-
-async function adminApproveWithdraw(client, withdrawId) {
-  const { rows: wdRows } = await client.query('SELECT * FROM withdraws WHERE id = $1 FOR UPDATE', [withdrawId]);
-  if (wdRows.length === 0) return { error: 'Withdraw not found.' };
-  const withdraw = wdRows[0];
-  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
-
-  const { rows: userRows } = await client.query('SELECT * FROM users WHERE username = $1 FOR UPDATE', [withdraw.username]);
-  if (userRows.length === 0) return { error: 'User not found.' };
-  const user = userRows[0];
-  const balance = parseFloat(user.balance) || 0;
-  if (balance < parseFloat(withdraw.amount)) return { error: 'Insufficient user balance.' };
-
-  await client.query('UPDATE withdraws SET status = $1 WHERE id = $2', ['approved', withdrawId]);
-  await client.query('UPDATE users SET balance = balance - $1 WHERE username = $2', [parseFloat(withdraw.amount), user.username]);
-  return { success: true, withdraw };
-}
-
-async function adminRejectWithdraw(client, withdrawId) {
-  const { rows: wdRows } = await client.query('SELECT * FROM withdraws WHERE id = $1 FOR UPDATE', [withdrawId]);
-  if (wdRows.length === 0) return { error: 'Withdraw not found.' };
-  const withdraw = wdRows[0];
-  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
-
-  await client.query('UPDATE withdraws SET status = $1 WHERE id = $2', ['rejected', withdrawId]);
-
-  // FIX #5: Restore BOTH weeklyWithdrawn AND totalWithdrawnCycle
-  const { rows: userRows } = await client.query('SELECT * FROM users WHERE username = $1 FOR UPDATE', [withdraw.username]);
-  if (userRows.length > 0) {
-    const user = userRows[0];
-    const newWeekly = Math.max(0, (parseFloat(user.weekly_withdrawn) || 0) - parseFloat(withdraw.amount));
-    const newCycle = Math.max(0, (parseFloat(user.total_withdrawn_cycle) || 0) - parseFloat(withdraw.amount));
-    await client.query(
-      'UPDATE users SET weekly_withdrawn = $1, total_withdrawn_cycle = $2 WHERE username = $3',
-      [newWeekly, newCycle, user.username]
-    );
-  }
-  return { success: true };
-}
+// ============ ADMIN: Shared Functions (FIX #14 - JSON-based) ============
+// PostgreSQL functions replaced with JSON versions below
 
 // ============ ADMIN ENDPOINTS ============
+// V032: Log all admin actions for audit trail
+function logAdminAction(action, adminUser, details) {
+  logAttack('ADMIN_ACTION', 'admin', `Admin: ${adminUser} | Action: ${action} | ${details}`);
+}
+
+
 // V032: Log all admin actions for audit trail
 function logAdminAction(action, adminUser, details) {
   logAttack('ADMIN_ACTION', 'admin', `Admin: ${adminUser} | Action: ${action} | ${details}`);
