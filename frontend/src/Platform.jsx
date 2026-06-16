@@ -692,7 +692,8 @@ function Login({ onLogin, onNav }) {
 
 /* ============ REGISTER ============ */
 function Register({ onNav }) {
-  const [u, setU] = useState(''); const [p, setP] = useState(''); const [cp, setCp] = useState(''); const [ref, setRef] = useState('');
+  const [u, setU] = useState(''); const [p, setP] = useState(''); const [cp, setCp] = useState('');
+  const [ref, setRef] = useState(() => { try { return new URLSearchParams(window.location.search).get('ref') || ''; } catch { return ''; } });
   const [load, setLoad] = useState(false); const [err, setErr] = useState('');
   const go = async () => {
     const refCode = ref.trim().toUpperCase();
@@ -713,8 +714,9 @@ function Register({ onNav }) {
     <input style={s.inp} placeholder="اسم المستخدم" value={u} onChange={e => setU(e.target.value)} />
     <input style={s.inp} type="password" placeholder="كلمة المرور (8+)" value={p} onChange={e => setP(e.target.value)} />
     <input style={s.inp} type="password" placeholder="تأكيد كلمة المرور" value={cp} onChange={e => setCp(e.target.value)} />
-    <input style={{ ...s.inp, borderColor: 'var(--accent)' }} placeholder="🔗 كود الإحالة (مطلوب)" value={ref} onChange={e => setRef(e.target.value.toUpperCase())} />
-    <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>كود الإحالة مطلوب — اطلبه من الشخص الذي دعاك</p>
+    <input style={{ ...s.inp, borderColor: ref ? 'var(--accent)' : 'var(--border)' }} placeholder="🔗 كود الإحالة (مطلوب)" value={ref} onChange={e => setRef(e.target.value.toUpperCase())} />
+    {ref && <p style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 10 }}>✅ تم تطبيق كود الإحالة تلقائياً من رابط الدعوة</p>}
+    {!ref && <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>كود الإحالة مطلوب — اطلبه من الشخص الذي دعاك</p>}
     <button style={s.btn('#28a745')} onClick={go} disabled={load}>{load ? '⏳...' : '📝 إنشاء الحساب'}</button>
   </FormCard>;
 }
@@ -846,7 +848,7 @@ function Dashboard({ user: initUser, onLogout }) {
 
       {msg && <div style={s.msg}>{msg}</div>}
 
-      {tab === 'wallet' && (<div style={s.tc}><h3>📊 معلومات الحساب</h3><Row l="الرصيد" v={`$${user.balance?.toFixed(2)}`} /><Row l="العمولات" v={`$${(user.totalCommission || 0).toFixed(2)}`} c="var(--accent)" /><Row l="إجمالي الأرباح" v={`$${(user.totalProfit || 0).toFixed(2)}`} c="var(--accent)" /><Row l="الخطة" v={tier ? tier.name : 'لم تفعّل بعد'} c={tier ? tier.color : 'var(--danger)'} />{tier && <Row l="الأرباح اليومية" v={`$${tier.daily}/يوم`} c="var(--accent)" />}<Row l="الإحالات المؤهلة" v={`${user.activeReferrals || 0} / ${user.tierMinReferrals || 3}`} c={(user.activeReferrals || 0) >= (user.tierMinReferrals || 3) ? 'var(--accent)' : 'var(--danger)'} /><Row l="إجمالي الإحالات" v={`${user.totalReferrals || 0}`} />{tier && <Row l="الحد الأسبوعي" v={`$${user.weeklyWithdrawn || 0} / $${tier.cap}`} />}<Row l="حالة السحب" v={canWd ? '🔓 مفتوح' : '🔒 مقفل'} c={canWd ? 'var(--accent)' : 'var(--danger)'} />{user.referrer && <Row l="المُحيل" v={user.referrer} c="var(--accent2)" />}</div>)}
+      {tab === 'wallet' && (<div style={s.tc}><h3>📊 معلومات الحساب</h3><Row l="الرصيد" v={`$${user.balance?.toFixed(2)}`} /><Row l="العمولات" v={`$${(user.totalCommission || 0).toFixed(2)}`} c="var(--accent)" /><Row l="إجمالي الأرباح" v={`$${(user.totalProfit || 0).toFixed(2)}`} c="var(--accent)" /><Row l="الخطة" v={tier ? tier.name : 'لم تفعّل بعد'} c={tier ? tier.color : 'var(--danger)'} />{tier && <Row l="الأرباح اليومية" v={`$${tier.daily}/يوم`} c="var(--accent)" />}<Row l="الإحالات النشطة" v={`${user.activeReferrals || 0} / 3`} c={(user.activeReferrals || 0) >= 3 ? 'var(--accent)' : 'var(--danger)'} /><Row l="إجمالي الإحالات" v={`${user.totalReferrals || 0}`} /><Row l="فتح الأرباح" v={user.referralProfitUnlocked ? '🔓 مفتوح' : '🔒 مقفل'} c={user.referralProfitUnlocked ? 'var(--accent)' : 'var(--danger)'} />{tier && <Row l="الحد الأسبوعي" v={`$${user.weeklyWithdrawn || 0} / $${tier.cap}`} />}<Row l="حالة السحب" v={canWd ? '🔓 مفتوح' : '🔒 مقفل'} c={canWd ? 'var(--accent)' : 'var(--danger)'} />{user.referrer && <Row l="المُحيل" v={user.referrer} c="var(--accent2)" />}</div>)}
       {tab === 'analytics' && <AnalyticsPanel user={user} />}
       {tab === 'converter' && <CryptoConverter />}
       {tab === 'faq' && <KnowledgeBase />}
@@ -857,7 +859,45 @@ function Dashboard({ user: initUser, onLogout }) {
 
       {tab === 'tiers' && (<div style={s.tc}><h3>🏅 اختر خطتك</h3>{user.activePlan && <p style={{ color: tier?.color, marginBottom: 15 }}>✅ خطتك الحالية: {tier?.name}</p>}<div className="tiers-grid">{Object.values(TIERS).map(t => (<div key={t.key} className="tier-card" style={{ background: t.bg, borderColor: user.activePlan === t.key ? t.color : 'var(--border)' }}><div className="tier-icon">{t.name.split(' ')[1]}</div><div className="tier-name" style={{ color: t.color }}>{t.name.split(' ')[0]}</div><div className="tier-deposit">{t.maxDeposit === null ? '$' + t.minDeposit + '+' : '$' + t.minDeposit + '-$' + t.maxDeposit}</div><div className="tier-label">نطاق الإيداع</div><div className="tier-profit">${t.daily}/يوم</div><div className="tier-label">أرباح حية</div><div className="tier-req">🔒 {t.minReferrals} إحالات {t.key === 'gold' ? 'Gold' : t.key === 'platinum' ? 'Platinum+' : t.key === 'silver' ? 'Silver+' : 'Bronze+'}</div><div className="tier-cap">📤 ${t.cap}/أسبوع</div>{!user.activePlan && (<button style={{ ...s.btn(t.color), marginTop: 10, fontSize: 13, padding: 8 }} onClick={() => activatePlan(t.key)} disabled={activating === t.key || user.balance < t.deposit}>{activating === t.key ? '⏳...' : user.balance >= t.deposit ? 'تفعيل' : 'تحتاج $' + (t.deposit - user.balance)}</button>)}{user.activePlan === t.key && <div style={{ color: t.color, marginTop: 10, fontWeight: 'bold' }}>✅ نشطة</div>}</div>))}</div></div>)}
 
-      {tab === 'referrals' && (<div style={s.tc}><h3>🕸️ شبكة الإحالة</h3><div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}><div style={s.stat()}><span>إجمالي</span><strong>{refs.total}</strong></div><div style={s.stat('#1a2a1a')}><span>مؤهل</span><strong style={{ color: 'var(--accent)' }}>{refs.qualified}</strong></div><div style={s.stat()}><span>عمولات</span><strong style={{ color: 'var(--accent)' }}>${(user.totalCommission || 0).toFixed(2)}</strong></div></div><h4>📋 المُحَالون ({refs.referrals?.length || 0}):</h4>{(!refs.referrals || refs.referrals.length === 0) ? <p style={{ color: 'var(--text3)' }}>لم تدعُ أحداً بعد.</p> : refs.referrals.map(r => (<div key={r.username} className="ref-row" style={{ borderRightColor: r.qualifies ? 'var(--accent)' : 'var(--danger)' }}><span>👤 {r.username}</span><span>{r.active ? (r.qualifies ? '✅ مؤهل' : '⚠️ غير مؤهل') : '⏳ بدون إيداع'}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.plan || 'بدون خطة'}</span></div>))}<div style={{ marginTop: 15, padding: 12, background: '#152238', borderRadius: 8, border: '1px dashed #007bff' }}><p style={{ fontSize: 13, color: 'var(--text3)' }}>📊 قواعد العمولات:</p><p style={{ fontSize: 12 }}>• 10% للمُحيل المباشر (Level 1)</p><p style={{ fontSize: 12 }}>• 5% لمُحيل المُحيل (Level 2)</p><p style={{ fontSize: 12 }}>• الإحالات يجب أن تكون بنفس مستواك أو أعلى</p></div></div>)}
+      {tab === 'referrals' && (<div style={s.tc}><h3>🕸️ شبكة الإحالة</h3>
+        {/* Referral Code & Link Section */}
+        <div style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', padding: 20, borderRadius: 14, border: '1px solid var(--accent)', marginBottom: 20 }}>
+          <div style={{ fontSize: 14, color: 'var(--text3)', marginBottom: 10 }}>🔗 كود الدعوة الخاص بك</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            <code style={{ color: 'var(--accent)', fontSize: 28, fontWeight: 'bold', letterSpacing: 4, background: 'rgba(57,255,20,0.1)', padding: '8px 20px', borderRadius: 8, border: '1px dashed var(--accent)' }}>{user.referralCode}</code>
+            <button style={{ padding: '10px 18px', background: copied ? '#28a745' : '#007bff', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 'bold' }} onClick={copyRef}>{copied ? '✅ تم النسخ!' : '📋 نسخ الكود'}</button>
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 8 }}>📎 رابط الدعوة (شاركه مع أصدقائك):</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <code style={{ color: '#007bff', fontSize: 12, background: 'rgba(0,123,255,0.1)', padding: '8px 14px', borderRadius: 6, border: '1px dashed #007bff', wordBreak: 'break-all', flex: 1, minWidth: 200 }}>{window.location.origin}?ref={user.referralCode}</code>
+            <button style={{ padding: '8px 14px', background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }} onClick={() => { navigator.clipboard.writeText(window.location.origin + '?ref=' + user.referralCode); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>📎 نسخ الرابط</button>
+          </div>
+        </div>
+
+        {/* Progress to Unlock */}
+        <div style={{ background: user.referralProfitUnlocked ? 'linear-gradient(135deg, #0a2a1a 0%, #0a3a1a 100%)' : 'linear-gradient(135deg, #2a1a1a 0%, #3a2a1a 100%)', padding: 20, borderRadius: 14, border: `1px solid ${user.referralProfitUnlocked ? 'var(--accent)' : 'var(--danger)'}`, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 15, fontWeight: 'bold' }}>{user.referralProfitUnlocked ? '🔓 الأرباح مفتوحة!' : '🔒 الأرباح مقفلة'}</span>
+            <span style={{ fontSize: 18, fontWeight: 'bold', color: user.referralProfitUnlocked ? 'var(--accent)' : 'var(--danger)' }}>{user.activeReferrals || 0} / 3</span>
+          </div>
+          {/* Progress Bar */}
+          <div style={{ width: '100%', height: 12, background: 'rgba(255,255,255,0.1)', borderRadius: 6, overflow: 'hidden', marginBottom: 10 }}>
+            <div style={{ width: `${Math.min(100, ((user.activeReferrals || 0) / 3) * 100)}%`, height: '100%', background: user.referralProfitUnlocked ? 'linear-gradient(90deg, #39ff14, #00cc6a)' : 'linear-gradient(90deg, #ffc107, #ff9800)', borderRadius: 6, transition: 'width 0.5s ease' }} />
+          </div>
+          {!user.referralProfitUnlocked && <div style={{ fontSize: 13, color: 'var(--warning)' }}>⚠️ ادعُ {3 - (user.activeReferrals || 0)} أشخاص إضافيين على الأقل (بإيداع موافق عليه) لفتح الأرباح</div>}
+          {user.referralProfitUnlocked && <div style={{ fontSize: 13, color: 'var(--accent)' }}>✅ تهانينا! أرباحك مفتوحة الآن يمكنك السحب</div>}
+        </div>
+
+        {/* Stats */}
+        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}><div style={s.stat()}><span>إجمالي</span><strong>{user.totalReferrals || 0}</strong></div><div style={s.stat('#1a2a1a')}><span>مؤهل</span><strong style={{ color: 'var(--accent)' }}>{user.activeReferrals || 0}</strong></div><div style={s.stat()}><span>عمولات</span><strong style={{ color: 'var(--accent)' }}>${(user.totalCommission || 0).toFixed(2)}</strong></div></div>
+
+        {/* Referrals List */}
+        <h4 style={{ marginTop: 20 }}>📋 المُحَالون ({refs.referrals?.length || 0}):</h4>
+        {(!refs.referrals || refs.referrals.length === 0) ? <p style={{ color: 'var(--text3)' }}>لم تدعُ أحداً بعد. شارك كود الدعوة الخاص بك!</p> : refs.referrals.map(r => (<div key={r.username} className="ref-row" style={{ borderRightColor: r.activePlan ? 'var(--accent)' : 'var(--danger)' }}><span>👤 {r.username}</span><span>{r.activePlan ? '✅ مؤهل' : '⏳ بدون إيداع'}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.activePlan || 'بدون خطة'}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(r.createdAt).toLocaleDateString('ar')}</span></div>))}
+
+        {/* Commission Rules */}
+        <div style={{ marginTop: 15, padding: 12, background: '#152238', borderRadius: 8, border: '1px dashed #007bff' }}><p style={{ fontSize: 13, color: 'var(--text3)' }}>📊 قواعد العمولات:</p><p style={{ fontSize: 12 }}>• 10% للمُحيل المباشر (Level 1)</p><p style={{ fontSize: 12 }}>• 5% لمُحيل المُحيل (Level 2)</p><p style={{ fontSize: 12 }}>• الإحالات يجب أن تكون بنفس مستواك أو أعلى</p><p style={{ fontSize: 12, marginTop: 6, color: 'var(--warning)' }}>⚠️ الأرباح تنفتح بعد 3 إحالات نشطة (بإيداع موافق عليه)</p></div>
+      </div>)}
 
       {tab === 'history' && (<div style={s.tc}><h3>📋 سجل المعاملات</h3>{txns.length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد معاملات.</p> : txns.slice().reverse().map(t => (<div key={t.id} className="txn-row"><span>{t.type.includes('deposit') ? '📥' : t.type.includes('withdraw') ? '📤' : t.type.includes('commission') ? '💰' : t.type.includes('plan') ? '🏅' : '⚙️'} {t.type}</span><span>{t.amount > 0 ? `$${t.amount}` : ''}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(t.timestamp).toLocaleString('ar')}</span></div>))}</div>)}
     </div>
