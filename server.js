@@ -357,14 +357,88 @@ function getTier(key) { return TIERS[key] || null; }
 function getWeeklyProfit(depositAmount) { return Number(depositAmount) * WEEKLY_PROFIT_PCT; }
 function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) / 7; }
 
-// ============ DATABASE (In-memory — no external DB needed) ============
+// ============ DATABASE (JSON file-based — no external DB needed) ============
+const DB_FILE = path.join(__dirname, 'database.json');
 let db = { users: [], deposits: [], withdraws: [], transactions: [] };
+
+function loadDB() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      console.log('[DB] Loaded', db.users.length, 'users from JSON');
+    }
+  } catch(e) { console.error('[DB] Load error:', e.message); db = { users: [], deposits: [], withdraws: [], transactions: [] }; }
+}
+
+function saveDB() {
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+  catch(e) { console.error('[DB] Save error:', e.message); }
+}
+
 if (ADMIN_PASSWORD_HASH && !db.users.find(u => u.username === 'admin')) {
   db.users.push({ id: crypto.randomUUID(), username: 'admin', password: ADMIN_PASSWORD_HASH, referralCode: 'ADMIN00', referredBy: 'SYSTEM', role: 'admin', activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0, weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0, totalWithdrawnCycle: 0, createdAt: new Date().toISOString() });
+  saveDB();
+  console.log('[DB] Admin user created');
 }
-console.log('[DB] In-memory database initialized');
+loadDB();
+
 async function dbRead() { return { ...db }; }
-async function dbWriteDb(d) { if (d.users) db.users = d.users; if (d.deposits) db.deposits = d.deposits; if (d.withdraws) db.withdraws = d.withdraws; if (d.transactions) db.transactions = d.transactions; }
+async function dbWriteDb(d) { if (d.users) db.users = d.users; if (d.deposits) db.deposits = d.deposits; if (d.withdraws) db.withdraws = d.withdraws; if (d.transactions) db.transactions = d.transactions; saveDB(); }
+
+// Admin: Approve deposit (JSON)
+async function adminApproveDepositJSON(depositId) {
+  const dep = db.deposits.find(d => d.id === depositId);
+  if (!dep) return { error: 'Deposit not found.' };
+  if (dep.status !== 'pending') return { error: 'Already processed.' };
+  const tierKey = getTierKeyByAmount(parseFloat(dep.amount));
+  dep.status = 'approved';
+  const user = db.users.find(u => u.username === dep.username);
+  if (!user) return { error: 'User not found.' };
+  user.balance = (parseFloat(user.balance) || 0) + parseFloat(dep.amount);
+  user.depositAmount = parseFloat(dep.amount);
+  if (tierKey) user.activePlan = tierKey;
+  if (!user.cycleStart || user.cycleStart === 0) { user.cycleStart = Date.now(); user.cycleWeek = 1; user.totalWithdrawnCycle = 0; }
+  if (user.referredBy && user.referredBy !== 'SYSTEM') {
+    const l1 = db.users.find(u => u.username === user.referredBy);
+    if (l1) { const c1 = parseFloat(dep.amount) * COMM_L1; l1.balance = (parseFloat(l1.balance) || 0) + c1; l1.totalCommission = (parseFloat(l1.totalCommission) || 0) + c1; if (l1.referredBy && l1.referredBy !== 'SYSTEM') { const l2 = db.users.find(u => u.username === l1.referredBy); if (l2) { const c2 = parseFloat(dep.amount) * COMM_L2; l2.balance = (parseFloat(l2.balance) || 0) + c2; l2.totalCommission = (parseFloat(l2.totalCommission) || 0) + c2; } } }
+  }
+  saveDB();
+  return { success: true, deposit: dep };
+}
+
+// Admin: Reject deposit (JSON)
+async function adminRejectDepositJSON(depositId) {
+  const dep = db.deposits.find(d => d.id === depositId);
+  if (!dep) return { error: 'Deposit not found.' };
+  if (dep.status !== 'pending') return { error: 'Already processed.' };
+  dep.status = 'rejected'; saveDB();
+  return { success: true };
+}
+
+// Admin: Approve withdraw (JSON)
+async function adminApproveWithdrawJSON(withdrawId) {
+  const wd = db.withdraws.find(w => w.id === withdrawId);
+  if (!wd) return { error: 'Withdraw not found.' };
+  if (wd.status !== 'pending') return { error: 'Already processed.' };
+  const user = db.users.find(u => u.username === wd.username);
+  if (!user) return { error: 'User not found.' };
+  if ((parseFloat(user.balance) || 0) < parseFloat(wd.amount)) return { error: 'Insufficient user balance.' };
+  wd.status = 'approved'; user.balance = (parseFloat(user.balance) || 0) - parseFloat(wd.amount);
+  saveDB();
+  return { success: true, withdraw: wd };
+}
+
+// Admin: Reject withdraw (JSON)
+async function adminRejectWithdrawJSON(withdrawId) {
+  const wd = db.withdraws.find(w => w.id === withdrawId);
+  if (!wd) return { error: 'Withdraw not found.' };
+  if (wd.status !== 'pending') return { error: 'Already processed.' };
+  wd.status = 'rejected';
+  const user = db.users.find(u => u.username === wd.username);
+  if (user) { const a = parseFloat(wd.amount); user.weeklyWithdrawn = Math.max(0, (parseFloat(user.weeklyWithdrawn) || 0) - a); user.totalWithdrawnCycle = Math.max(0, (parseFloat(user.totalWithdrawnCycle) || 0) - a); }
+  saveDB();
+  return { success: true };
+}
 
 // ============ TOKEN BLACKLIST (V5.4 — V004 fix) ============
 // In-memory blacklist for invalidated tokens (cleared on restart, but tokens expire in 24h anyway)
