@@ -357,7 +357,7 @@ function getTier(key) { return TIERS[key] || null; }
 function getWeeklyProfit(depositAmount) { return Number(depositAmount) * WEEKLY_PROFIT_PCT; }
 function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) / 7; }
 
-// ============ DATABASE (JSON file-based — works everywhere, no external DB needed) ============
+// ============ DATABASE (JSON file-based — no external DB needed) ============
 const DB_FILE = path.join(__dirname, 'database.json');
 let db = { users: [], deposits: [], withdraws: [], transactions: [] };
 
@@ -365,14 +365,9 @@ function loadDB() {
   try {
     if (fs.existsSync(DB_FILE)) {
       db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      console.log('[DB] Loaded', db.users.length, 'users from JSON file');
-    } else {
-      console.log('[DB] No database file, starting fresh');
+      console.log('[DB] Loaded', db.users.length, 'users from JSON');
     }
-  } catch(e) {
-    console.error('[DB] Load error:', e.message);
-    db = { users: [], deposits: [], withdraws: [], transactions: [] };
-  }
+  } catch(e) { console.error('[DB] Load error:', e.message); db = { users: [], deposits: [], withdraws: [], transactions: [] }; }
 }
 
 function saveDB() {
@@ -380,106 +375,67 @@ function saveDB() {
   catch(e) { console.error('[DB] Save error:', e.message); }
 }
 
-// Initialize admin if hash is set
-function initAdmin() {
-  if (ADMIN_PASSWORD_HASH && !db.users.find(u => u.username === 'admin')) {
-    db.users.push({
-      id: crypto.randomUUID(), username: 'admin', password: ADMIN_PASSWORD_HASH,
-      referralCode: 'ADMIN00', referredBy: 'SYSTEM', role: 'admin',
-      activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0,
-      weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0,
-      totalWithdrawnCycle: 0, createdAt: new Date().toISOString()
-    });
-    saveDB();
-    console.log('[DB] Admin user created');
-  }
+if (ADMIN_PASSWORD_HASH && !db.users.find(u => u.username === 'admin')) {
+  db.users.push({ id: crypto.randomUUID(), username: 'admin', password: ADMIN_PASSWORD_HASH, referralCode: 'ADMIN00', referredBy: 'SYSTEM', role: 'admin', activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0, weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0, totalWithdrawnCycle: 0, createdAt: new Date().toISOString() });
+  saveDB();
+  console.log('[DB] Admin user created');
 }
-
 loadDB();
-initAdmin();
 
 async function dbRead() { return { ...db }; }
+async function dbWriteDb(d) { if (d.users) db.users = d.users; if (d.deposits) db.deposits = d.deposits; if (d.withdraws) db.withdraws = d.withdraws; if (d.transactions) db.transactions = d.transactions; saveDB(); }
 
-async function dbWriteDb(d) {
-  if (d.users) db.users = d.users;
-  if (d.deposits) db.deposits = d.deposits;
-  if (d.withdraws) db.withdraws = d.withdraws;
-  if (d.transactions) db.transactions = d.transactions;
-  saveDB();
-}
-
-// JSON-compatible admin operations
+// Admin: Approve deposit (JSON)
 async function adminApproveDepositJSON(depositId) {
-  const deposit = db.deposits.find(d => d.id === depositId);
-  if (!deposit) return { error: 'Deposit not found.' };
-  if (deposit.status !== 'pending') return { error: 'Already processed.' };
-  const tierKey = getTierKeyByAmount(parseFloat(deposit.amount));
-  deposit.status = 'approved';
-  const user = db.users.find(u => u.username === deposit.username);
+  const dep = db.deposits.find(d => d.id === depositId);
+  if (!dep) return { error: 'Deposit not found.' };
+  if (dep.status !== 'pending') return { error: 'Already processed.' };
+  const tierKey = getTierKeyByAmount(parseFloat(dep.amount));
+  dep.status = 'approved';
+  const user = db.users.find(u => u.username === dep.username);
   if (!user) return { error: 'User not found.' };
-  user.balance = (parseFloat(user.balance) || 0) + parseFloat(deposit.amount);
-  user.depositAmount = parseFloat(deposit.amount);
+  user.balance = (parseFloat(user.balance) || 0) + parseFloat(dep.amount);
+  user.depositAmount = parseFloat(dep.amount);
   if (tierKey) user.activePlan = tierKey;
-  if (!user.cycleStart || user.cycleStart === 0) {
-    user.cycleStart = Date.now();
-    user.cycleWeek = 1;
-    user.totalWithdrawnCycle = 0;
-  }
-  // Commission: L1
+  if (!user.cycleStart || user.cycleStart === 0) { user.cycleStart = Date.now(); user.cycleWeek = 1; user.totalWithdrawnCycle = 0; }
   if (user.referredBy && user.referredBy !== 'SYSTEM') {
     const l1 = db.users.find(u => u.username === user.referredBy);
-    if (l1) {
-      const l1Comm = parseFloat(deposit.amount) * COMM_L1;
-      l1.balance = (parseFloat(l1.balance) || 0) + l1Comm;
-      l1.totalCommission = (parseFloat(l1.totalCommission) || 0) + l1Comm;
-      if (l1.referredBy && l1.referredBy !== 'SYSTEM') {
-        const l2 = db.users.find(u => u.username === l1.referredBy);
-        if (l2) {
-          const l2Comm = parseFloat(deposit.amount) * COMM_L2;
-          l2.balance = (parseFloat(l2.balance) || 0) + l2Comm;
-          l2.totalCommission = (parseFloat(l2.totalCommission) || 0) + l2Comm;
-        }
-      }
-    }
+    if (l1) { const c1 = parseFloat(dep.amount) * COMM_L1; l1.balance = (parseFloat(l1.balance) || 0) + c1; l1.totalCommission = (parseFloat(l1.totalCommission) || 0) + c1; if (l1.referredBy && l1.referredBy !== 'SYSTEM') { const l2 = db.users.find(u => u.username === l1.referredBy); if (l2) { const c2 = parseFloat(dep.amount) * COMM_L2; l2.balance = (parseFloat(l2.balance) || 0) + c2; l2.totalCommission = (parseFloat(l2.totalCommission) || 0) + c2; } } }
   }
   saveDB();
-  return { success: true, deposit };
+  return { success: true, deposit: dep };
 }
 
+// Admin: Reject deposit (JSON)
 async function adminRejectDepositJSON(depositId) {
-  const deposit = db.deposits.find(d => d.id === depositId);
-  if (!deposit) return { error: 'Deposit not found.' };
-  if (deposit.status !== 'pending') return { error: 'Already processed.' };
-  deposit.status = 'rejected';
-  saveDB();
+  const dep = db.deposits.find(d => d.id === depositId);
+  if (!dep) return { error: 'Deposit not found.' };
+  if (dep.status !== 'pending') return { error: 'Already processed.' };
+  dep.status = 'rejected'; saveDB();
   return { success: true };
 }
 
+// Admin: Approve withdraw (JSON)
 async function adminApproveWithdrawJSON(withdrawId) {
-  const withdraw = db.withdraws.find(w => w.id === withdrawId);
-  if (!withdraw) return { error: 'Withdraw not found.' };
-  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
-  const user = db.users.find(u => u.username === withdraw.username);
+  const wd = db.withdraws.find(w => w.id === withdrawId);
+  if (!wd) return { error: 'Withdraw not found.' };
+  if (wd.status !== 'pending') return { error: 'Already processed.' };
+  const user = db.users.find(u => u.username === wd.username);
   if (!user) return { error: 'User not found.' };
-  const balance = parseFloat(user.balance) || 0;
-  if (balance < parseFloat(withdraw.amount)) return { error: 'Insufficient user balance.' };
-  withdraw.status = 'approved';
-  user.balance = balance - parseFloat(withdraw.amount);
+  if ((parseFloat(user.balance) || 0) < parseFloat(wd.amount)) return { error: 'Insufficient user balance.' };
+  wd.status = 'approved'; user.balance = (parseFloat(user.balance) || 0) - parseFloat(wd.amount);
   saveDB();
-  return { success: true, withdraw };
+  return { success: true, withdraw: wd };
 }
 
+// Admin: Reject withdraw (JSON)
 async function adminRejectWithdrawJSON(withdrawId) {
-  const withdraw = db.withdraws.find(w => w.id === withdrawId);
-  if (!withdraw) return { error: 'Withdraw not found.' };
-  if (withdraw.status !== 'pending') return { error: 'Already processed.' };
-  withdraw.status = 'rejected';
-  const user = db.users.find(u => u.username === withdraw.username);
-  if (user) {
-    const amt = parseFloat(withdraw.amount);
-    user.weeklyWithdrawn = Math.max(0, (parseFloat(user.weeklyWithdrawn) || 0) - amt);
-    user.totalWithdrawnCycle = Math.max(0, (parseFloat(user.totalWithdrawnCycle) || 0) - amt);
-  }
+  const wd = db.withdraws.find(w => w.id === withdrawId);
+  if (!wd) return { error: 'Withdraw not found.' };
+  if (wd.status !== 'pending') return { error: 'Already processed.' };
+  wd.status = 'rejected';
+  const user = db.users.find(u => u.username === wd.username);
+  if (user) { const a = parseFloat(wd.amount); user.weeklyWithdrawn = Math.max(0, (parseFloat(user.weeklyWithdrawn) || 0) - a); user.totalWithdrawnCycle = Math.max(0, (parseFloat(user.totalWithdrawnCycle) || 0) - a); }
   saveDB();
   return { success: true };
 }
@@ -774,91 +730,58 @@ app.post('/api/deposit', authenticateToken, depositLimiter, async (req, res) => 
 app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) => {
   try {
     const { amount } = req.body;
-
-    // Strict validation
-    if (amount === null || amount === undefined || amount === '') {
-      return res.status(400).json({ success: false, message: 'Amount is required.' });
-    }
-    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
-      return res.status(400).json({ success: false, message: 'Amount must be a finite number.' });
-    }
-    if (amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid amount.' });
-    }
+    if (amount === null || amount === undefined || amount === '') return res.status(400).json({ success: false, message: 'Amount is required.' });
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) return res.status(400).json({ success: false, message: 'Amount must be a finite number.' });
+    if (amount <= 0) return res.status(400).json({ success: false, message: 'Invalid amount.' });
     const amt = Math.round(amount * 100) / 100;
 
-    // FIX #4: Lock user row (JSON mode — no FOR UPDATE needed, single-threaded)
-    const result = await (async () => {
-      const user = db.users.find(u => u.username === req.user.username);
-      if (!user) return { error: 'User not found.' };
+    const user = db.users.find(u => u.username === req.user.username);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+    if (!user.activePlan && !user.active_plan) return res.status(400).json({ success: false, message: 'No active plan. Deposit first.' });
 
-      if (!user.active_plan) return { error: 'No active plan. Deposit first.' };
+    const tier = getTier(user.activePlan || user.active_plan);
+    const depositAmt = parseFloat(user.depositAmount || user.deposit_amount) || 0;
+    const weeklyProfit = getWeeklyProfit(depositAmt);
+    const userTierLevel = tier ? tier.level : 0;
 
-      const tier = getTier(user.active_plan);
-      const depositAmt = parseFloat(user.deposit_amount) || 0;
-      const weeklyProfit = getWeeklyProfit(depositAmt);
-      const userTierLevel = tier ? tier.level : 0;
+    const allDirectDownline = db.users.filter(u => (u.referredBy || u.referred_by) === user.username);
+    const approvedDeposits = db.deposits.filter(d => d.status === 'approved');
+    const approvedUsernames = new Set(approvedDeposits.map(d => d.username));
+    const approvedDownline = allDirectDownline.filter(ref => {
+      if (!ref.activePlan && !ref.active_plan) return false;
+      const refTier = getTier(ref.activePlan || ref.active_plan);
+      if (!refTier) return false;
+      return approvedUsernames.has(ref.username) && refTier.level >= userTierLevel;
+    });
 
-      // Check referrals
-      const allDirectDownline = db.users.filter(u => u.referredBy === user.username);
-      const approvedDeposits = db.deposits.filter(d => d.status === 'approved');
-      const approvedUsernames = new Set(approvedDeposits.map(d => d.username));
-      const approvedDownline = allDirectDownline.filter(ref => {
-        if (!ref.activePlan && !ref.active_plan) return false;
-        const refTier = getTier(ref.activePlan || ref.active_plan);
-        if (!refTier) return false;
-        return approvedUsernames.has(ref.username) && refTier.level >= userTierLevel;
-      });
+    if (approvedDownline.length < 3) return res.status(403).json({ success: false, message: `Need 3 approved downline from your tier or higher. Currently: ${approvedDownline.length}/3`, code: 'REFERRAL_LOCK', approvedReferrals: approvedDownline.length });
 
-      if (approvedDownline.length < 3) {
-        return { error: `Need 3 approved downline from your tier or higher. Currently: ${approvedDownline.length}/3`, code: 'REFERRAL_LOCK', approvedReferrals: approvedDownline.length };
-      }
+    let cycleWeek = user.cycleWeek || user.cycle_week || 1;
+    const cycleStart = user.cycleStart || user.cycle_start || 0;
+    let totalWithdrawnCycle = parseFloat(user.totalWithdrawnCycle || user.total_withdrawn_cycle) || 0;
+    if (cycleStart > 0) { const weekMs = 7 * 24 * 60 * 60 * 1000; const elapsed = Date.now() - cycleStart; cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1); }
+    if (cycleWeek > CYCLE_WEEKS) return res.status(400).json({ success: false, message: `Cycle expired! ${CYCLE_WEEKS} weeks completed. Re-deposit and bring 3 new referrals.`, code: 'CYCLE_EXPIRED' });
 
-      // Cycle check
-      let cycleWeek = user.cycleWeek || user.cycle_week || 1;
-      const cycleStart = user.cycleStart || user.cycle_start || 0;
-      let totalWithdrawnCycle = parseFloat(user.totalWithdrawnCycle || user.total_withdrawn_cycle) || 0;
-      if (cycleStart > 0) { const weekMs = 7 * 24 * 60 * 60 * 1000; const elapsed = Date.now() - cycleStart; cycleWeek = Math.min(CYCLE_WEEKS, Math.floor(elapsed / weekMs) + 1); }
-      if (cycleWeek > CYCLE_WEEKS) return { error: `Cycle expired! ${CYCLE_WEEKS} weeks completed. Re-deposit and bring 3 new referrals.`, code: 'CYCLE_EXPIRED' };
+    const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
+    if (totalWithdrawnCycle + amt > maxWithdrawal) return res.status(400).json({ success: false, message: `Max withdrawal reached. Remaining: $${(maxWithdrawal - totalWithdrawnCycle).toFixed(2)}`, code: 'CYCLE_MAX', remaining: +(maxWithdrawal - totalWithdrawnCycle).toFixed(2) });
 
-      const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
-      if (totalWithdrawnCycle + amt > maxWithdrawal) {
-        return { error: `Max withdrawal reached. Remaining: $${(maxWithdrawal - totalWithdrawnCycle).toFixed(2)}`, code: 'CYCLE_MAX', remaining: +(maxWithdrawal - totalWithdrawnCycle).toFixed(2) };
-      }
+    const weekElapsed = Date.now() - (user.weekStart || user.week_start || 0);
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    let weeklyWithdrawn = parseFloat(user.weeklyWithdrawn || user.weekly_withdrawn) || 0;
+    if (weekElapsed > weekMs) weeklyWithdrawn = 0;
+    if (weeklyWithdrawn + amt > weeklyProfit) return res.status(400).json({ success: false, message: `Weekly cap exceeded. Remaining: $${(weeklyProfit - weeklyWithdrawn).toFixed(2)}`, code: 'WEEKLY_CAP', remaining: +(weeklyProfit - weeklyWithdrawn).toFixed(2) });
 
-      // Weekly cap
-      const weekElapsed = Date.now() - (user.weekStart || user.week_start || 0);
-      const weekMs = 7 * 24 * 60 * 60 * 1000;
-      let weeklyWithdrawn = parseFloat(user.weeklyWithdrawn || user.weekly_withdrawn) || 0;
-      if (weekElapsed > weekMs) { weeklyWithdrawn = 0; }
-      if (weeklyWithdrawn + amt > weeklyProfit) {
-        return { error: `Weekly cap exceeded. Remaining: $${(weeklyProfit - weeklyWithdrawn).toFixed(2)}`, code: 'WEEKLY_CAP', remaining: +(weeklyProfit - weeklyWithdrawn).toFixed(2) };
-      }
+    const balance = parseFloat(user.balance) || 0;
+    if (balance < amt) return res.status(400).json({ success: false, message: `Insufficient balance. Available: $${balance.toFixed(2)}`, code: 'INSUFFICIENT_BALANCE' });
 
-      // Balance check
-      const balance = parseFloat(user.balance) || 0;
-      if (balance < amt) {
-        return { error: `Insufficient balance. Available: $${balance.toFixed(2)}`, code: 'INSUFFICIENT_BALANCE' };
-      }
+    const withdrawId = crypto.randomUUID();
+    db.withdraws.push({ id: withdrawId, username: user.username, amount: amt, status: 'pending', createdAt: new Date().toISOString() });
+    user.weeklyWithdrawn = weeklyWithdrawn + amt;
+    user.totalWithdrawnCycle = totalWithdrawnCycle + amt;
+    user.cycleWeek = cycleWeek;
+    saveDB();
 
-      // Create withdraw record
-      const withdrawId = crypto.randomUUID();
-      db.withdraws.push({ id: withdrawId, username: user.username, amount: amt, status: 'pending', createdAt: new Date().toISOString() });
-
-      // Update user
-      user.weeklyWithdrawn = weeklyWithdrawn + amt;
-      user.totalWithdrawnCycle = totalWithdrawnCycle + amt;
-      user.cycleWeek = cycleWeek;
-      saveDB();
-
-      return { success: true, withdrawId };
-    })();
-
-    if (result.error) {
-      return res.status(result.code === 'INSUFFICIENT_BALANCE' ? 400 : result.code === 'REFERRAL_LOCK' ? 403 : 400).json({ success: false, message: result.error, code: result.code, ...result });
-    }
-
-    res.json({ success: true, message: 'Withdraw request submitted.', withdraw: { id: result.withdrawId, amount: amt, status: 'pending' } });
+    res.json({ success: true, message: 'Withdraw request submitted.', withdraw: { id: withdrawId, amount: amt, status: 'pending' } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
