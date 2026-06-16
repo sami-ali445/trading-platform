@@ -239,19 +239,13 @@ const depositLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 10,
   message: { success: false, message: 'Too many deposit requests. Max 10 per hour.' },
   standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => {
-    if (req.user?.username) return req.user.username;
-    return ipKeyGenerator(req);
-  }
+  keyGenerator: (req) => req.user?.username || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
 });
 const withdrawLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 5,
   message: { success: false, message: 'Too many withdraw requests. Max 5 per hour.' },
   standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => {
-    if (req.user?.username) return req.user.username;
-    return ipKeyGenerator(req);
-  }
+  keyGenerator: (req) => req.user?.username || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
 });
 app.use('/api/', generalLimiter);
 app.use(checkCsrf);
