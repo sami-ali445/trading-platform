@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: trading-platform
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGIN
+        value: "https://trading-platform-iglr.onrender.com"
+      - key: DATABASE_URL
+        value: "postgresql://postgres:haydar1986haydar@db.dilzpxhazjlmyniswyzm.supabase.co:5432/postgres"
