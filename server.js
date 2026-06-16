@@ -59,6 +59,9 @@ function logAttack(type, ip, details) {
 // ============ APP INIT (before middleware that uses app) ============
 const app = express();
 
+// V036: Health endpoint BEFORE all middleware (bypasses CORS/CSRF for monitoring)
+app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
+
 // ============ SECURITY: CSP Header (FIX #6) ============
 // Enable CSP with directives that match our app's needs
 app.use(helmet({
@@ -591,9 +594,6 @@ function requireAdmin(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only.' });
   next();
 }
-
-// ============ HEALTH ============
-app.get('/api/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
 
 // V5.4: Security audit endpoint removed (was temporary, V001/V002 fixed)
 
