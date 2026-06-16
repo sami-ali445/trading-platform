@@ -3,7 +3,7 @@ services:
     name: trading-platform
     runtime: node
     plan: free
-    buildCommand: npm install && cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist/* public/
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
