@@ -34,6 +34,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -238,13 +239,19 @@ const depositLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 10,
   message: { success: false, message: 'Too many deposit requests. Max 10 per hour.' },
   standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => req.user?.username || req.ip
+  keyGenerator: (req) => {
+    if (req.user?.username) return req.user.username;
+    return ipKeyGenerator(req);
+  }
 });
 const withdrawLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, max: 5,
   message: { success: false, message: 'Too many withdraw requests. Max 5 per hour.' },
   standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => req.user?.username || req.ip
+  keyGenerator: (req) => {
+    if (req.user?.username) return req.user.username;
+    return ipKeyGenerator(req);
+  }
 });
 app.use('/api/', generalLimiter);
 app.use(checkCsrf);
