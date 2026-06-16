@@ -1,6 +1,5 @@
 node_modules/
 frontend/node_modules/
-database.json
 .env
 *.log
 .DS_Store
