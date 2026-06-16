@@ -223,6 +223,11 @@ app.use((req, res, next) => {
 });
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err));
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err.message);
+  // Don't exit — keep the server running
+});
+
 process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', err));
 
 // ============ RATE LIMITING ============
@@ -921,6 +926,13 @@ function getReferralStats(username, db) {
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));
 app.use((req, res, next) => { if (!req.path.startsWith('/api/')) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.sendFile(path.join(PUBLIC_DIR, 'index.html')); } else { next(); } });
+
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', err.message);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+});
 
 // ============ START ============
 const server = app.listen(PORT, '0.0.0.0', () => { console.log('Trading Platform v5.5 running on port ' + PORT); });
