@@ -60,6 +60,74 @@ function logAttack(type, ip, details) {
 const app = express();
 
 // ============ SECURITY: CSP Header (FIX #6) ============
+// Enable CSP with directives that match our app's needs
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],  // React inline styles
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "same-origin" },
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+}));
+
+// V5.4: Content-Type validation middleware (V008 fix)
+function requireJsonContent(req, res, next) {
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    const ct = req.headers['content-type'];
+    if (!ct || !ct.includes('application/json')) {
+      logAttack('INVALID_CONTENT_TYPE', req.ip, `Path: ${req.path}, Content-Type: ${ct || 'none'}`);
+      return res.status(415).json({ success: false, message: 'Content-Type must be application/json.' });
+    }
+  }
+  next();
+}
+
+app.use(express.json({ limit: '10kb' }));
+app.use(cookieParser());
+app.use(requireJsonContent);
+
+// ============ SECURITY: CORS - Strict Origin Whitelist (FIX #1) ============
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+// V5.5: Don't crash on missing ALLOWED_ORIGIN in production - just warn
+if (!ALLOWED_ORIGIN && process.env.NODE_ENV === 'production') {
+  console.error('[WARN] ALLOWED_ORIGIN not set in production - CORS will block all requests!');
+}
+const corsOptions = {
+  origin: function (origin, callback) {
+    // V5.4: In production, require Origin header (no curl/script bypass)
+    if (!origin) {
+      if (process.env.NODE_ENV === 'production') {
+        // V5.5: Don't crash on missing ALLOWED_ORIGIN, just block
+        if (!ALLOWED_ORIGIN) {
+          return callback(new Error('CORS policy: no origin'));
+        }
+        logAttack('CORS_NO_ORIGIN', 'unknown', 'Blocked request with no Origin header');
+        return callback(new Error('CORS policy: Origin header required'));
+      }
+      return callback(null, true); // Allow in development
+    }
+    if (origin === ALLOWED_ORIGIN) {
+      return callback(null, true);
+    }
+    logAttack('CORS_BLOCKED', origin, `Blocked origin: ${origin}`);
+    return callback(new Error('CORS policy: origin not allowed'));
+  },
+  methods: ['GET', 'POST'],
+  credentials: true,
+  maxAge: 86400,
+};
+app.use(cors(corsOptions));
+
 // Minimal routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.send('OK'));
