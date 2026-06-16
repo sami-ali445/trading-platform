@@ -45,13 +45,14 @@ app.get('/api/test', (req, res) => res.json({ test: 'ok' }));
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log('Test server on port ' + PORT));
 
-// ============ DATABASE (PostgreSQL only) ============
+
+// ============ DATABASE (PostgreSQL — non-blocking) ============
 let pgPool = null;
 
 (function initDB() {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
-    console.error('[DB] FATAL: DATABASE_URL not set!');
+    console.log('[DB] No DATABASE_URL, skipping');
     return;
   }
   try {
@@ -59,115 +60,27 @@ let pgPool = null;
     const { Pool } = pg;
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: false,
-      max: 2,
-      min: 0,
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 30000,
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+      connectionTimeoutMillis: 10000,
     });
     pgPool.on('error', (err) => console.error('[DB] Pool error:', err.message));
-    pgPool.on('connect', () => console.log('[DB] New client connected'));
-    pgPool.query('SELECT 1 as test').then((result) => {
+    pgPool.query('SELECT 1').then(() => {
       console.log('[DB] PostgreSQL connected OK');
     }).catch(e => {
-      console.error('[DB] PG test failed:', e.code, e.message);
+      console.error('[DB] PostgreSQL connection failed:', e.message);
     });
   } catch(e) {
-    console.error('[DB] PG init failed:', e.message);
-  }
-})();
-
-// Initialize tables on startup
-(async function initTables() {
-  if (!pgPool) {
-    console.error('[DB] Skipping table init - no pool');
-    return;
-  }
-  const maxRetries = 10;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log('[DB] Table init attempt', attempt);
-    const client = await pgPool.connect();
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
-          referral_code VARCHAR(20) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
-          deposit_amount DECIMAL(12,2) DEFAULT 0,
-          balance DECIMAL(12,2) DEFAULT 0, total_commission DECIMAL(12,2) DEFAULT 0,
-          weekly_withdrawn DECIMAL(12,2) DEFAULT 0, week_start BIGINT DEFAULT 0,
-          cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
-          total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0,
-          created_at TIMESTAMP DEFAULT NOW(), role VARCHAR(20) DEFAULT 'user'
-        );
-        CREATE TABLE IF NOT EXISTS deposits (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
-          amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending',
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS withdraws (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL,
-          status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS transactions (
-          id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL,
-          amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
-      console.log('[DB] Tables created successfully');
-      await client.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_amount DECIMAL(12,2) DEFAULT 0;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
-        ALTER TABLE users ALTER COLUMN referral_code TYPE VARCHAR(50);
-      `);
-      console.log('[DB] Columns verified');
-      const adminExists = await client.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
-      if (adminExists.rowCount === 0) {
-        // Only create admin if ADMIN_PASS_HASH is set
-        if (ADMIN_PASSWORD_HASH) {
-          await client.query(
-            'INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)',
-            [crypto.randomUUID(), 'admin', ADMIN_PASSWORD_HASH, 'ADMIN00', 'SYSTEM', 'admin']
-          );
-          console.log('[DB] Admin user created');
-        } else {
-          console.log('[DB] No ADMIN_PASS_HASH set - admin user not created');
-        }
-      } else {
-        console.log('[DB] Admin user already exists');
-      }
-      return;
-    } catch(e) {
-      console.error('[DB] Init tables attempt', attempt, 'failed:', e.message, e.code);
-      if (attempt < maxRetries) {
-        const delay = 3000 * attempt;
-        console.log('[DB] Retrying in', delay, 'ms...');
-        await new Promise(r => setTimeout(r, delay));
-      }
-    } finally {
-      client.release();
-    }
+    console.error('[DB] Init error:', e.message);
   }
 })();
 
 async function withDb(fn) {
-  if (!pgPool) {
-    console.error('[DB] No pool!');
-    return null;
-  }
+  if (!pgPool) return null;
   const client = await pgPool.connect();
-  try {
-    const result = await fn(client);
-    return result;
-  } catch(e) {
-    console.error('[DB] Query error:', e.message, e.code);
-    throw e;
-  } finally {
-    client.release();
-  }
+  try { return await fn(client); }
+  catch(e) { console.error('[DB] Query error:', e.message); throw e; }
+  finally { client.release(); }
 }
 
 async function dbRead() {
@@ -186,7 +99,7 @@ async function dbRead() {
 }
 
 async function dbWriteDb(d) {
-  if (!pgPool) { console.error('[DB WRITE] No pool!'); return; }
+  if (!pgPool) return;
   const client = await pgPool.connect();
   try {
     for (const u of d.users) {
@@ -200,13 +113,35 @@ async function dbWriteDb(d) {
     for (const w of d.withdraws) {
       try { await client.query('INSERT INTO withdraws (id, username, amount, status, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status', [w.id || crypto.randomUUID(), w.username, w.amount, w.status, w.createdAt || w.created_at || new Date().toISOString()]); } catch(e) { console.error('[DB WRITE WITHDRAW ERROR]', e.message); }
     }
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 }
 
-
-
-// Test route
-app.get('/api/test', (req, res) => res.json({ test: 'ok', db: pgPool ? 'connected' : 'no pool' }));
+// Initialize tables on startup (non-blocking)
+(async function initTables() {
+  if (!pgPool) return;
+  const client = await pgPool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password TEXT NOT NULL,
+        referral_code VARCHAR(50) NOT NULL, referred_by VARCHAR(50), active_plan VARCHAR(20),
+        deposit_amount DECIMAL(12,2) DEFAULT 0, balance DECIMAL(12,2) DEFAULT 0,
+        total_commission DECIMAL(12,2) DEFAULT 0, weekly_withdrawn DECIMAL(12,2) DEFAULT 0,
+        week_start BIGINT DEFAULT 0, cycle_week INTEGER DEFAULT 1, cycle_start BIGINT DEFAULT 0,
+        total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(),
+        role VARCHAR(20) DEFAULT 'user'
+      );
+      CREATE TABLE IF NOT EXISTS deposits (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL, amount DECIMAL(12,2) NOT NULL, tx_id VARCHAR(100), status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW());
+      CREATE TABLE IF NOT EXISTS withdraws (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, amount DECIMAL(12,2) NOT NULL, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW());
+      CREATE TABLE IF NOT EXISTS transactions (id UUID PRIMARY KEY, username VARCHAR(50) NOT NULL, type VARCHAR(20) NOT NULL, amount DECIMAL(12,2) NOT NULL, description TEXT, created_at TIMESTAMP DEFAULT NOW());
+    `);
+    console.log('[DB] Tables created/verified');
+    const adminExists = await client.query("SELECT 1 FROM users WHERE username=$1", ['admin']);
+    if (adminExists.rowCount === 0 && process.env.ADMIN_PASS_HASH) {
+      await client.query('INSERT INTO users (id, username, password, referral_code, referred_by, role) VALUES ($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), 'admin', process.env.ADMIN_PASS_HASH, 'ADMIN00', 'SYSTEM', 'admin']);
+      console.log('[DB] Admin user created');
+    }
+  } catch(e) { console.error('[DB] Table init error:', e.message); }
+  finally { client.release(); }
+})();
 
