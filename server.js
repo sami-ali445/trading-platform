@@ -387,13 +387,13 @@ let pgPool = null;
   }
 })();
 
-// Initialize tables on startup
+// Initialize tables on startup (non-blocking)
 (async function initTables() {
   if (!pgPool) {
     console.error('[DB] Skipping table init - no pool');
     return;
   }
-  const maxRetries = 10;
+  const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log('[DB] Table init attempt', attempt);
     const client = await pgPool.connect();
@@ -450,7 +450,7 @@ let pgPool = null;
     } catch(e) {
       console.error('[DB] Init tables attempt', attempt, 'failed:', e.message, e.code);
       if (attempt < maxRetries) {
-        const delay = 3000 * attempt;
+        const delay = 2000 * attempt;
         console.log('[DB] Retrying in', delay, 'ms...');
         await new Promise(r => setTimeout(r, delay));
       }
