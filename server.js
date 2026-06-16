@@ -357,33 +357,18 @@ function getTier(key) { return TIERS[key] || null; }
 function getWeeklyProfit(depositAmount) { return Number(depositAmount) * WEEKLY_PROFIT_PCT; }
 function getDailyProfit(depositAmount) { return getWeeklyProfit(depositAmount) / 7; }
 
-// ============ DATABASE (JSON file-based — no external DB needed) ============
-const DB_FILE = path.join(__dirname, 'database.json');
+// ============ DATABASE (In-memory — no file I/O, no external DB) ============
 let db = { users: [], deposits: [], withdraws: [], transactions: [] };
 
-function loadDB() {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      console.log('[DB] Loaded', db.users.length, 'users from JSON');
-    }
-  } catch(e) { console.error('[DB] Load error:', e.message); db = { users: [], deposits: [], withdraws: [], transactions: [] }; }
-}
-
-function saveDB() {
-  try { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
-  catch(e) { console.error('[DB] Save error:', e.message); }
-}
-
+// Initialize admin if hash is set
 if (ADMIN_PASSWORD_HASH && !db.users.find(u => u.username === 'admin')) {
   db.users.push({ id: crypto.randomUUID(), username: 'admin', password: ADMIN_PASSWORD_HASH, referralCode: 'ADMIN00', referredBy: 'SYSTEM', role: 'admin', activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0, weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0, totalWithdrawnCycle: 0, createdAt: new Date().toISOString() });
-  saveDB();
-  console.log('[DB] Admin user created');
+  console.log('[DB] Admin user created (in-memory)');
 }
-loadDB();
+console.log('[DB] In-memory database initialized');
 
 async function dbRead() { return { ...db }; }
-async function dbWriteDb(d) { if (d.users) db.users = d.users; if (d.deposits) db.deposits = d.deposits; if (d.withdraws) db.withdraws = d.withdraws; if (d.transactions) db.transactions = d.transactions; saveDB(); }
+async function dbWriteDb(d) { if (d.users) db.users = d.users; if (d.deposits) db.deposits = d.deposits; if (d.withdraws) db.withdraws = d.withdraws; if (d.transactions) db.transactions = d.transactions; }
 
 // Admin: Approve deposit (JSON)
 async function adminApproveDepositJSON(depositId) {
