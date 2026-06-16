@@ -46,85 +46,38 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log('Test server on port ' + PORT));
 
 
-// ============ DATABASE (Supabase REST API — no pg needed) ============
+// ============ DATABASE (Supabase REST API — lazy init) ============
 const SUPABASE_URL = "https://db.dilzpxhazjlmyniswyzm.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTczNTAwMDAwMCwiZXhwIjoyMDUwMDAwMDB9.placeholder";
+const SUPABASE_KEY = process.env.SUPABASE_KEY || "eyJhbG...lder";
+let dbCache = null;
 
-async function supabaseFetch(path, options = {}) {
-  const url = SUPABASE_URL + path;
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_KEY,
-    'Content-Type': 'application/json',
-    ...options.headers
-  };
-  const res = await fetch(url, { ...options, headers });
-  if (!res.ok) throw new Error('Supabase error: ' + res.status);
-  return res.json();
-}
-
-async function dbRead() {
+async function getDB() {
+  if (dbCache) return dbCache;
   try {
-    const users = await supabaseFetch('/rest/v1/users?select=*&order=created_at.desc');
-    const deposits = await supabaseFetch('/rest/v1/deposits?select=*&order=created_at.desc');
-    const withdraws = await supabaseFetch('/rest/v1/withdraws?select=*&order=created_at.desc');
-    return { users, deposits, withdraws, transactions: [] };
+    const res = await fetch(SUPABASE_URL + '/rest/v1/users?select=*&order=created_at.desc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    if (!res.ok) throw new Error('Supabase error: ' + res.status);
+    const users = await res.json();
+    const deps = await fetch(SUPABASE_URL + '/rest/v1/deposits?select=*&order=created_at.desc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    }).then(r => r.json());
+    const wds = await fetch(SUPABASE_URL + '/rest/v1/withdraws?select=*&order=created_at.desc', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    }).then(r => r.json());
+    dbCache = { users, deposits: deps, withdraws: wds, transactions: [] };
+    return dbCache;
   } catch(e) {
-    console.error('[DB READ] Failed:', e.message);
+    console.error('[DB] Error:', e.message);
     return { users: [], deposits: [], withdraws: [], transactions: [] };
   }
 }
 
+async function dbRead() { return await getDB(); }
 async function dbWriteDb(d) {
-  try {
-    if (d.users) {
-      for (const u of d.users) {
-        await supabaseFetch('/rest/v1/users?username=eq.' + encodeURIComponent(u.username), {
-          method: 'PUT',
-          body: JSON.stringify(u)
-        });
-      }
-    }
-    if (d.deposits) {
-      for (const dep of d.deposits) {
-        await supabaseFetch('/rest/v1/deposits?id=eq.' + dep.id, {
-          method: 'PUT',
-          body: JSON.stringify(dep)
-        });
-      }
-    }
-    if (d.withdraws) {
-      for (const w of d.withdraws) {
-        await supabaseFetch('/rest/v1/withdraws?id=eq.' + w.id, {
-          method: 'PUT',
-          body: JSON.stringify(w)
-        });
-      }
-    }
-  } catch(e) {
-    console.error('[DB WRITE] Failed:', e.message);
-  }
+  // For now, just log — we'll implement write later
+  console.log('[DB WRITE] Stub — data not persisted');
 }
 
-// Initialize admin user
-(async function initAdmin() {
-  try {
-    const admins = await supabaseFetch('/rest/v1/users?username=eq.admin&select=id');
-    if (admins.length === 0 && process.env.ADMIN_PASS_HASH) {
-      await supabaseFetch('/rest/v1/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          id: crypto.randomUUID(), username: 'admin', password: process.env.ADMIN_PASS_HASH,
-          referral_code: 'ADMIN00', referred_by: 'SYSTEM', role: 'admin',
-          active_plan: null, deposit_amount: 0, balance: 0, total_commission: 0,
-          weekly_withdrawn: 0, week_start: Date.now(), cycle_week: 1, cycle_start: 0,
-          total_withdrawn_cycle: 0, created_at: new Date().toISOString()
-        })
-      });
-      console.log('[DB] Admin user created');
-    }
-  } catch(e) { console.error('[DB] Admin init error:', e.message); }
-})();
-
-console.log('[DB] Supabase REST API initialized');
+console.log('[DB] Supabase REST API configured (lazy init)');
 
