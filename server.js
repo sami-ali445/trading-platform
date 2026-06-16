@@ -525,6 +525,7 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
     });
     const approvedDownlineCount = approvedDownline.length;
     const canWithdraw = approvedDownlineCount >= 3;
+    const referralProfitUnlocked = approvedDownlineCount >= 3;
     let cycleWeek = user.cycleWeek || user.cycle_week || 1;
     const cycleStart = user.cycleStart || user.cycle_start || 0;
     const totalWithdrawnCycle = user.totalWithdrawnCycle || user.total_withdrawn_cycle || 0;
@@ -533,7 +534,7 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
     const maxWithdrawal = depositAmt * MAX_WITHDRAWAL_PCT;
     const weeklyWithdrawn = user.weeklyWithdrawn || user.weekly_withdrawn || 0;
     const totalCommission = user.totalCommission || user.total_commission || 0;
-    res.json({ success: true, user: { username: user.username, balance: user.balance || 0, depositAmount: depositAmt, totalCommission, activePlan, tierName: tier ? tier.name : null, tierLabel: tier ? tier.label : null, referralCode: user.referralCode || user.referral_code, referrer: user.referredBy || user.referred_by, dailyProfit: +dailyProfit.toFixed(2), weeklyProfit: +weeklyProfit.toFixed(2), canWithdraw, approvedDownlineCount, requiredReferrals: 3, cycleWeek, cycleTotalWeeks: CYCLE_WEEKS, cycleExpired, totalWithdrawnCycle, maxWithdrawal: +maxWithdrawal.toFixed(2), remainingWithdrawal: +Math.max(0, maxWithdrawal - totalWithdrawnCycle).toFixed(2), weeklyWithdrawn, role: user.role || 'user', createdAt: user.createdAt || user.created_at } });
+    res.json({ success: true, user: { username: user.username, balance: user.balance || 0, depositAmount: depositAmt, totalCommission, activePlan, tierName: tier ? tier.name : null, tierLabel: tier ? tier.label : null, referralCode: user.referralCode || user.referral_code, referrer: user.referredBy || user.referred_by, dailyProfit: +dailyProfit.toFixed(2), weeklyProfit: +weeklyProfit.toFixed(2), canWithdraw, approvedDownlineCount, activeReferrals: approvedDownlineCount, totalReferrals: allDirectDownline.length, referralProfitUnlocked, requiredReferrals: 3, cycleWeek, cycleTotalWeeks: CYCLE_WEEKS, cycleExpired, totalWithdrawnCycle, maxWithdrawal: +maxWithdrawal.toFixed(2), remainingWithdrawal: +Math.max(0, maxWithdrawal - totalWithdrawnCycle).toFixed(2), weeklyWithdrawn, role: user.role || 'user', createdAt: user.createdAt || user.created_at } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
