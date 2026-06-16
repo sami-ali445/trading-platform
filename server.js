@@ -43,13 +43,12 @@ function logAttack(type, ip, details) {
 }
 
 // ============ SECURITY: CSRF Protection ============
-// Generate CSRF token and set as cookie
+// Generate CSRF token and expose it to frontend via header + cookie
 app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api/')) {
-    const token = crypto.randomBytes(32).toString('hex');
-    res.cookie('csrf_token', token, { httpOnly: true, sameSite: 'strict', secure: true, maxAge: 86400000 });
-    req.csrfToken = token;
-  }
+  const token = crypto.randomBytes(32).toString('hex');
+  res.cookie('csrf_token', token, { httpOnly: false, sameSite: 'strict', secure: true, maxAge: 86400000 });
+  res.set('X-CSRF-Token', token);
+  req.csrfToken = token;
   next();
 });
 

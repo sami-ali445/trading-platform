@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import axios from 'axios';
 
-const API = axios.create({ baseURL: '/api' });
-API.interceptors.request.use(c => { const t = localStorage.getItem('token'); if (t) c.headers.Authorization = `Bearer ${t}`; return c; });
-API.interceptors.response.use(r => r, e => { if (e.response?.status === 401) { localStorage.clear(); window.location.reload(); } return Promise.reject(e); });
+const API = axios.create({ baseURL: '/api', withCredentials: true });
+// JWT + CSRF token interceptor
+API.interceptors.request.use(c => { const t = localStorage.getItem('token'); if (t) c.headers.Authorization = `Bearer ${t}`; const csrf = localStorage.getItem('csrf_token'); if (csrf) c.headers['X-CSRF-Token'] = csrf; return c; });
+API.interceptors.response.use(r => { const csrf = r.headers['x-csrf-token']; if (csrf) localStorage.setItem('csrf_token', csrf); return r; }, e => { if (e.response?.status === 401) { localStorage.clear(); window.location.reload(); } return Promise.reject(e); });
 
 const TIERS = {
   bronze:  { key: 'bronze',  name: 'Bronze 🥉',  deposit: 10,   daily: 0.29,  cap: 2,    minDeposit: 10,  maxDeposit: 49,   color: '#CD7F32', bg: '#2a1f10' },
