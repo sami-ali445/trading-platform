@@ -58,8 +58,10 @@ function checkCsrf(req, res, next) {
   const clientToken = req.headers['x-csrf-token'] || req.body?._csrf;
   const cookieToken = req.cookies?.csrf_token;
   if (req.path.startsWith('/api/auth/')) return next(); // Auth routes exempt (no session yet)
+  // If no client token provided yet (first visit), allow through
+  if (!clientToken && !cookieToken) return next();
   if (!clientToken || !cookieToken || clientToken !== cookieToken) {
-    logAttack('CSRF', req.ip || req.connection?.remoteAgent, `Path: ${req.path}`);
+    logAttack('CSRF', req.ip || req.connection?.remoteAddress, `Path: ${req.path}`);
     return res.status(403).json({ success: false, message: 'CSRF token invalid.' });
   }
   next();
@@ -110,7 +112,9 @@ process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', e
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '10kb' }));
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*', methods: ['GET', 'POST'], credentials: true }));
+// ============ SECURITY: CORS - restrict to same origin ============
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+app.use(cors({ origin: ALLOWED_ORIGIN || false, methods: ['GET', 'POST'], credentials: true }));
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 60,
@@ -123,6 +127,7 @@ const authLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false
 });
 app.use(generalLimiter);
+app.use(checkCsrf);
 
 // ============ CONFIGURATION ============
 const PORT = process.env.PORT || 4000;
@@ -309,6 +314,7 @@ let pgPool = null;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_week INTEGER DEFAULT 1;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS cycle_start BIGINT DEFAULT 0;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS total_withdrawn_cycle DECIMAL(12,2) DEFAULT 0;
+        ALTER TABLE users ALTER COLUMN referral_code TYPE VARCHAR(50);
       `);
       console.log('[DB] Columns verified');
       const adminExists = await client.query('SELECT 1 FROM users WHERE username=$1', ['admin']);
@@ -456,7 +462,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const isRootCode = ROOT_REFERRAL_CODES.includes(referralCode.toUpperCase());
     const referrer = isRootCode ? { username: 'SYSTEM', referralCode: referralCode.toUpperCase() } : db.users.find(u => u.referralCode === referralCode);
     if (!referrer) return res.status(400).json({ success: false, message: 'Invalid referral code.' });
-    const myCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const myCode = crypto.randomBytes(5).toString('hex').toUpperCase() + Date.now().toString(36).toUpperCase();
     const hashedPassword = await bcrypt.hash(password, 12);
     const newUser = { id: crypto.randomUUID(), username, password: hashedPassword, referralCode: myCode, referredBy: referrer.username, activePlan: null, depositAmount: 0, balance: 0, totalCommission: 0, weeklyWithdrawn: 0, weekStart: Date.now(), cycleWeek: 1, cycleStart: 0, totalWithdrawnCycle: 0, createdAt: new Date().toISOString(), role: 'user' };
     db.users.push(newUser);
@@ -555,6 +561,7 @@ app.post('/api/deposit', authenticateToken, async (req, res) => {
   try {
     const { amount, txId } = req.body; const amt = Number(amount);
     if (!amt || amt < 10) return res.status(400).json({ success: false, message: 'Minimum deposit is $10.' });
+    if (amt > 50000) return res.status(400).json({ success: false, message: 'Maximum deposit is $50,000.' });
     const tier = getTierByAmount(amt); const tierKey = getTierKeyByAmount(amt);
     if (!tier || !tierKey) return res.status(400).json({ success: false, message: 'Invalid deposit amount.' });
     const db = await dbRead(); const user = db.users.find(u => u.username === req.user.username);
