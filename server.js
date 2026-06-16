@@ -198,66 +198,6 @@ setInterval(() => {
     if (record.lockUntil && now > record.lockUntil + 3600000) {
       loginAttempts.delete(username);
     }
-  }
-}, 600000);
-
-app.use((req, res, next) => {
-  const ip = req.ip || req.connection?.remoteAddress;
-  if (req.path.includes('/auth/') && req.method === 'POST') {
-    logAttack('AUTH_ATTEMPT', ip, `Path: ${req.path}, User-Agent: ${req.headers['user-agent']?.substring(0, 50) || 'unknown'}`);
-  }
-  const record = suspiciousIPs.get(ip) || { count: 0, lastReq: 0 };
-  const now = Date.now();
-  if (now - record.lastReq < 100) {
-    record.count++;
-    if (record.count > 20) {
-      logAttack('BOT_DETECTED', ip, `Rapid requests: ${record.count} in <2s`);
-      return res.status(429).json({ success: false, message: 'Suspicious activity detected.' });
-    }
-  } else {
-    record.count = 0;
-  }
-  record.lastReq = now;
-  suspiciousIPs.set(ip, record);
-  next();
-});
-
-process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err));
-process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', err));
-
-// ============ RATE LIMITING ============
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 60,
-  message: { success: false, message: 'Too many requests. Try again in 15 minutes.' },
-  standardHeaders: true, legacyHeaders: false
-});
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 10,
-  message: { success: false, message: 'Too many login attempts. Try again in 15 minutes.' },
-  standardHeaders: true, legacyHeaders: false
-});
-// V5.4: Specific rate limiters for financial operations
-const depositLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, max: 10,
-  message: { success: false, message: 'Too many deposit requests. Max 10 per hour.' },
-  standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => req.user?.username || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
-});
-const withdrawLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, max: 5,
-  message: { success: false, message: 'Too many withdraw requests. Max 5 per hour.' },
-  standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => req.user?.username || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
-});
-app.use('/api/', generalLimiter);
-app.use(checkCsrf);
-
-// ============ CONFIGURATION ============
-const PORT = process.env.PORT || 4000;
-
-// FIX #9: JWT_SECRET is REQUIRED - no fallback in production
-if (!process.env.JWT_SECRET) {
-  if (process.env.NODE_ENV === 'production') {
 // Minimal routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.send('OK'));
