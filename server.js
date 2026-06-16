@@ -39,11 +39,13 @@ app.use('/api/', generalLimiter);
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Test route
-app.get('/api/test', (req, res) => res.json({ test: 'ok' }));
+// Serve frontend static files
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));
+app.use((req, res, next) => { if (!req.path.startsWith('/api/')) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.sendFile(path.join(PUBLIC_DIR, 'index.html')); } else { next(); } });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, '0.0.0.0', () => console.log('Test server on port ' + PORT));
+app.listen(PORT, '0.0.0.0', () => console.log('Server on port ' + PORT));
 
 
 // ============ DATABASE (Supabase REST API — lazy init) ============
