@@ -60,7 +60,7 @@ let pgPool = null;
     const { Pool } = pg;
     pgPool = new Pool({
       connectionString: dbUrl,
-      ssl: { rejectUnauthorized: false },
+      ssl: false,
       max: 3,
       connectionTimeoutMillis: 10000,
     });
