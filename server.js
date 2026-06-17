@@ -191,18 +191,34 @@ let dbConnected = false;
   try {
     const pg = require('pg');
     const { Pool } = pg;
+    // Parse connection string to get host/port
+    const url = new URL(dbUrl);
+    const host = url.hostname;
+    const port = parseInt(url.port) || 5432;
+    const dbname = url.pathname.slice(1);
+    const user = url.username;
+    const password = url.password;
+
     pgPool = new Pool({
-      connectionString: dbUrl,
+      host: host,
+      port: port,
+      database: dbname,
+      user: user,
+      password: password,
       ssl: { rejectUnauthorized: false },
       max: 3, min: 0,
       idleTimeoutMillis: 15000,
       connectionTimeoutMillis: 10000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 5000,
+      // Force IPv4 lookup
+      lookup: (hostname, options, callback) => {
+        const dns = require('dns');
+        dns.lookup(hostname, { family: 4, all: false }, callback);
+      },
     });
     pgPool.on('error', (err) => { console.error('[DB] Pool error:', err.message); dbConnected = false; });
     pgPool.on('connect', () => { console.log('[DB] Client connected'); dbConnected = true; });
-    // Test connection (non-blocking)
     pgPool.query('SELECT 1').then(() => {
       console.log('[DB] PostgreSQL connected OK');
       dbConnected = true;
