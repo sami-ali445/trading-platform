@@ -604,7 +604,14 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
 // ============ STATIC FILES ============
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));
-app.use((req, res, next) => { if (!req.path.startsWith('/api/')) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.sendFile(path.join(PUBLIC_DIR, 'index.html')); } else { next(); } });
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') && !req.path.startsWith('/assets/')) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  } else {
+    next();
+  }
+});
 
 // ============ Global Error Handler ============
 app.use((err, req, res, next) => { console.error('[ERROR]', err.message); res.status(500).json({ success: false, message: 'Internal error: ' + err.message }); });
