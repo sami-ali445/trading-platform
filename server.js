@@ -226,7 +226,11 @@ async function sbFetch(table, params = {}) {
   if (params.limit) qp.push('limit=' + params.limit);
   if (qp.length) url += '?' + qp.join('&');
   const res = await fetch(url, { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' } });
-  if (!res.ok) throw new Error('SB ' + table + ': ' + res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error('[SB Fetch error]', res.status, errText.substring(0, 200));
+    throw new Error('SB ' + table + ': ' + res.status + ' ' + errText.substring(0, 100));
+  }
   return res.json();
 }
 
@@ -236,7 +240,11 @@ async function sbInsert(table, data, upsert) {
     headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': upsert ? 'return=representation,resolution=merge-duplicates' : 'return=representation' },
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('SB insert ' + table + ': ' + res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error('[SB Insert error]', table, res.status, errText.substring(0, 300));
+    throw new Error('SB insert ' + table + ': ' + res.status + ' ' + errText.substring(0, 200));
+  }
   return res.json();
 }
 
@@ -265,7 +273,10 @@ async function dbRead() {
 
 async function dbWriteDb(d) {
   for (const u of (d.users||[])) {
-    try { await sbInsert('users', { id: u.id||crypto.randomUUID(), username: u.username, password: u.password, referral_code: u.referralCode||u.referral_code, referred_by: u.referredBy||u.referred_by, active_plan: u.activePlan||u.active_plan, deposit_amount: u.depositAmount||u.deposit_amount||0, balance: u.balance||0, total_commission: u.totalCommission||u.total_commission||0, weekly_withdrawn: u.weeklyWithdrawn||u.weekly_withdrawn||0, week_start: u.weekStart||u.week_start||0, cycle_week: u.cycleWeek||u.cycle_week||1, cycle_start: u.cycleStart||u.cycle_start||0, total_withdrawn_cycle: u.totalWithdrawnCycle||u.total_withdrawn_cycle||0, role: u.role||'user', created_at: u.createdAt||u.created_at||new Date().toISOString() }, true); }
+    try {
+      const result = await sbInsert('users', { id: u.id||crypto.randomUUID(), username: u.username, password: u.password, referral_code: u.referralCode||u.referral_code, referred_by: u.referredBy||u.referred_by, active_plan: u.activePlan||u.active_plan, deposit_amount: u.depositAmount||u.deposit_amount||0, balance: u.balance||0, total_commission: u.totalCommission||u.total_commission||0, weekly_withdrawn: u.weeklyWithdrawn||u.weekly_withdrawn||0, week_start: u.weekStart||u.week_start||0, cycle_week: u.cycleWeek||u.cycle_week||1, cycle_start: u.cycleStart||u.cycle_start||0, total_withdrawn_cycle: u.totalWithdrawnCycle||u.total_withdrawn_cycle||0, role: u.role||'user', created_at: u.createdAt||u.created_at||new Date().toISOString() }, true);
+      console.log('[DB] User saved:', u.username, JSON.stringify(result).substring(0,100));
+    }
     catch(e) { console.error('[DB W USER]', u.username, e.message); }
   }
   for (const dep of (d.deposits||[])) {
