@@ -745,7 +745,7 @@ function Register({ onNav }) {
 /* ============ ADMIN LOGIN ============ */
 function AdminLogin({ onLogin, onNav }) {
   const [u, setU] = useState(''); const [p, setP] = useState(''); const [load, setLoad] = useState(false); const [err, setErr] = useState('');
-  const go = async () => { setLoad(true); setErr(''); try { const r = await API.post('/auth/admin/login', { username: u, password: p }); if (r.data.success) { localStorage.setItem('user', JSON.stringify({ username: 'admin', isAdmin: true })); onLogin(r.data.token, { username: 'admin', isAdmin: true }); } } catch (e) { setErr(e.response?.data?.message || 'خطأ!'); } setLoad(false); };
+  const go = async () => { setLoad(true); setErr(''); try { const r = await API.post('/auth/admin/login', { username: u, password: p }); if (r.data.success) { localStorage.setItem('user', JSON.stringify({ username: 'admin', isAdmin: true })); onLogin(null, { username: 'admin', isAdmin: true }); } } catch (e) { setErr(e.response?.data?.message || 'خطأ!'); } setLoad(false); };
   return <FormCard title="🔒 لوحة الإدارة" err={err} footer={<button style={s.bb} onClick={() => onNav('landing')}>← العودة</button>}>
     <input style={s.inp} placeholder="اسم المدير" value={u} onChange={e => setU(e.target.value)} />
     <input style={s.inp} type="password" placeholder="كلمة مرور المدير" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
