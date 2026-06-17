@@ -51,13 +51,14 @@ if (!ALLOWED_ORIGIN && process.env.NODE_ENV === 'production') {
 }
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) {
-      if (process.env.NODE_ENV === 'production') {
-        return callback(new Error('CORS: Origin required'));
-      }
-      return callback(null, true);
-    }
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    // Allow the configured origin
     if (origin === ALLOWED_ORIGIN) return callback(null, true);
+    // In production, also allow the render domain
+    if (process.env.NODE_ENV === 'production' && origin.includes('onrender.com')) return callback(null, true);
+    // Allow in development
+    if (process.env.NODE_ENV !== 'production') return callback(null, true);
     logAttack('CORS_BLOCKED', origin, 'Blocked: ' + origin);
     return callback(new Error('CORS: not allowed'));
   },
