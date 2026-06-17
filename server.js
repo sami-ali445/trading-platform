@@ -278,6 +278,19 @@ async function dbWriteDb(d) {
   }
 }
 
+// ============ Init Tables (service_owner key required) ============
+async function initTables() {
+  try {
+    // Test read
+    const test = await sbFetch('users', { limit: '1' });
+    console.log('[DB] Supabase connected OK, users table exists');
+  } catch(e) {
+    console.error('[DB] Cannot read users table:', e.message);
+    console.error('[DB] Create tables manually in Supabase SQL Editor');
+  }
+}
+initTables();
+
 // ============ Token Blacklist ============
 const tokenBlacklist = new Map();
 setInterval(() => { const now = Date.now(); for (const [t, exp] of tokenBlacklist) { if (now > exp) tokenBlacklist.delete(t); } }, 300000);
