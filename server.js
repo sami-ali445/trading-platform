@@ -490,6 +490,36 @@ app.post('/api/withdraw', authenticateToken, withdrawLimiter, async (req, res) =
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ============ HELPER: Check if user has 3 approved downline ============
+async function checkApprovedDownline(username) {
+  const allDownline = await withDb(async (c) => {
+    const { rows } = await c.query('SELECT * FROM users WHERE referred_by=$1', [username]);
+    return rows;
+  });
+  if (!allDownline || allDownline.length === 0) return { count: 0, approved: [] };
+
+  const downlineUsernames = allDownline.map(u => u.username);
+  const user = await withDb(async (c) => {
+    const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [username]);
+    return rows[0];
+  });
+  const userTier = user?.active_plan ? getTier(user.active_plan) : null;
+  const userTierLevel = userTier ? userTier.level : 0;
+
+  const approvedDownline = [];
+  for (const ref of allDownline) {
+    if (!ref.active_plan) continue;
+    const refTier = getTier(ref.active_plan);
+    if (!refTier || refTier.level < userTierLevel) continue;
+    const hasApproved = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT 1 FROM deposits WHERE username=$1 AND status=$2 LIMIT 1', [ref.username, 'approved']);
+      return rows.length > 0;
+    });
+    if (hasApproved) approvedDownline.push(ref.username);
+  }
+  return { count: approvedDownline.length, approved: approvedDownline };
+}
+
 // ============ ADMIN ============
 async function adminApproveDeposit(depositId) {
   const deps = await withDb(async (c) => { const { rows } = await c.query('SELECT * FROM deposits WHERE id=$1', [depositId]); return rows; });
@@ -500,6 +530,20 @@ async function adminApproveDeposit(depositId) {
   const users = await withDb(async (c) => { const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [deposit.username]); return rows; });
   if (!users || !users.length) return { error: 'User not found.' };
   const user = users[0];
+
+  // Check if this is the user's first approved deposit (activating a plan)
+  const isFirstDeposit = !user.active_plan || user.active_plan === null;
+
+  // If first deposit, check if user has 3 approved downline (unless they used BOOT00)
+  if (isFirstDeposit && deposit.amount >= 10) {
+    const refCheck = await checkApprovedDownline(user.username);
+    // Only enforce referral requirement if user was not referred by SYSTEM (BOOT00 root)
+    const isRootUser = user.referred_by === 'SYSTEM' || !user.referred_by;
+    if (!isRootUser && refCheck.count < 3) {
+      return { error: 'User needs 3 approved downline to activate plan. Currently: ' + refCheck.count + '/3. Deposit saved but plan not activated.' };
+    }
+  }
+
   const newBal = (parseFloat(user.balance) || 0) + parseFloat(deposit.amount);
   const nowMs = Date.now();
   const newCS = (!user.cycle_start || user.cycle_start === 0) ? nowMs : user.cycle_start;
@@ -598,6 +642,35 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
     else return res.status(400).json({ success:false, message:'Invalid type.' });
     if (r.error) return res.status(400).json({ success:false, message:r.error });
     res.json({ success:true, message:action + ' successful.' });
+  } catch (err) { res.status(500).json({ success:false, message:err.message }); }
+});
+
+// Admin: Reset user cycle (for new 7-week cycle)
+app.post('/api/admin/users/:username/reset-cycle', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const user = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [req.params.username]);
+      return rows[0];
+    });
+    if (!user) return res.status(404).json({ success:false, message:'User not found.' });
+
+    const nowMs = Date.now();
+    await withDb(async (c) => {
+      await c.query('UPDATE users SET cycle_start=$1, cycle_week=1, total_withdrawn_cycle=0, weekly_withdrawn=0, week_start=$1 WHERE username=$2', [nowMs, req.params.username]);
+    });
+    res.json({ success:true, message:'Cycle reset for ' + req.params.username + '. New 7-week cycle started.' });
+  } catch (err) { res.status(500).json({ success:false, message:err.message }); }
+});
+
+// Admin: Get user referral status
+app.get('/api/admin/users/:username/referrals', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const refCheck = await checkApprovedDownline(req.params.username);
+    const allDownline = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT username, active_plan, referred_by FROM users WHERE referred_by=$1', [req.params.username]);
+      return rows;
+    });
+    res.json({ success:true, username: req.params.username, approvedCount: refCheck.count, required: 3, downline: allDownline || [] });
   } catch (err) { res.status(500).json({ success:false, message:err.message }); }
 });
 
