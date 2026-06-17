@@ -644,5 +644,11 @@ app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeader
 app.use((req, res, next) => { if (!req.path.startsWith('/api/')) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.sendFile(path.join(PUBLIC_DIR, 'index.html')); } else { next(); } });
 
 // ============ START ============
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', err.message, err.stack);
+  res.status(500).json({ success: false, message: 'Internal error: ' + err.message });
+});
+
 const server = app.listen(PORT, '0.0.0.0', () => { console.log('Trading Platform v5.6 running on port ' + PORT); });
 server.keepAliveTimeout = 65000; server.headersTimeout = 66000;
