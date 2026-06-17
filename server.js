@@ -357,7 +357,14 @@ const tokenBlacklist = new Map();
 setInterval(() => { const now = Date.now(); for (const [t, exp] of tokenBlacklist) { if (now > exp) tokenBlacklist.delete(t); } }, 300000);
 function isTokenBlacklisted(t) { return tokenBlacklist.has(t); }
 function blacklistToken(t) { try { const d = jwt.decode(t); tokenBlacklist.set(t, d && d.exp ? d.exp * 1000 : Date.now() + 86400000); } catch { tokenBlacklist.set(t, Date.now() + 86400000); } }
-function generateToken(p) { return jwt.sign(p, JWT_SECRET, { expiresIn: '24h' }); }
+function generateToken(p, req) {
+  // Add session fingerprint to prevent token theft/ghost sessions
+  const fingerprint = crypto.createHash('sha256')
+    .update((req?.headers['user-agent'] || '') + (req?.ip || ''))
+    .digest('hex')
+    .substring(0, 16);
+  return jwt.sign({ ...p, fp: fingerprint }, JWT_SECRET, { expiresIn: '24h' });
+}
 function setTokenCookie(res, token) { res.cookie('auth_token', token, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 86400000, path: '/' }); }
 function clearTokenCookie(res) { res.clearCookie('auth_token', { path: '/' }); }
 
@@ -367,7 +374,20 @@ function authenticateToken(req, res, next) {
   const t = cookieToken || headerToken;
   if (!t) return res.status(401).json({ success: false, message: 'No token.' });
   if (isTokenBlacklisted(t)) return res.status(403).json({ success: false, message: 'Token revoked.' });
-  jwt.verify(t, JWT_SECRET, (err, u) => { if (err) return res.status(403).json({ success: false, message: 'Invalid token.' }); req.user = u; next(); });
+  jwt.verify(t, JWT_SECRET, (err, u) => {
+    if (err) return res.status(403).json({ success: false, message: 'Invalid token.' });
+    // Verify session fingerprint - prevents ghost/hack sessions
+    const currentFp = crypto.createHash('sha256')
+      .update((req.headers['user-agent'] || '') + (req.ip || ''))
+      .digest('hex')
+      .substring(0, 16);
+    if (u.fp && u.fp !== currentFp) {
+      logAttack('GHOST_SESSION', req.ip, 'User: ' + u.username + ' FP mismatch');
+      return res.status(403).json({ success: false, message: 'Session invalid. Please login again.' });
+    }
+    req.user = { username: u.username, role: u.role };
+    next();
+  });
 }
 function requireAdmin(req, res, next) { if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only.' }); next(); }
 
@@ -442,7 +462,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (!valid) { recordFail(username); return res.status(401).json({ success: false, message: 'Invalid credentials.' }); }
     recordSuccess(username);
 
-    const token = generateToken({ username: user.username, role: user.role || 'user' });
+    const token = generateToken({ username: user.username, role: user.role || 'user' }, req);
     setTokenCookie(res, token);
     res.json({ success: true, username: user.username, role: user.role || 'user' });
   } catch (err) { console.error('[LOGIN]', err); res.status(500).json({ success: false, message: 'Server error' }); }
@@ -464,7 +484,7 @@ app.post('/api/auth/admin/login', authLimiter, async (req, res) => {
     if (!valid) { recordFail(username); return res.status(401).json({ success: false, message: 'Invalid admin.' }); }
     recordSuccess(username);
 
-    const token = generateToken({ username: user.username, role: 'admin' });
+    const token = generateToken({ username: user.username, role: 'admin' }, req);
     setTokenCookie(res, token);
     res.json({ success: true, username: user.username, role: 'admin' });
   } catch (err) { console.error('[ADMIN LOGIN]', err); res.status(500).json({ success: false, message: 'Server error' }); }
