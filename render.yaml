@@ -3,7 +3,7 @@ services:
     name: trading-platform
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && cd frontend && npm install && npm run build && cd .. && cp -r frontend.dist/* public/
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:
