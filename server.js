@@ -1041,6 +1041,23 @@ app.get('/api/admin/users/:username/tiers', authenticateToken, requireAdmin, asy
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ============ TELEGRAM SUPPORT BOT ============
+const { setupSupportRoutes } = require('./supportRoutes');
+setupSupportRoutes(app, withDb, authenticateToken, requireAdmin);
+
+// Setup Telegram webhook (if token is set)
+if (process.env.TELEGRAM_BOT_TOKEN) {
+  try {
+    const { setupWebhook } = require('./telegramBot');
+    setupWebhook(app, '/webhook/telegram');
+    console.log('[TELEGRAM] Support bot enabled');
+  } catch (e) {
+    console.error('[TELEGRAM] Init failed:', e.message);
+  }
+} else {
+  console.log('[TELEGRAM] No bot token - support bot disabled');
+}
+
 // ============ STATIC FILES ============
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));

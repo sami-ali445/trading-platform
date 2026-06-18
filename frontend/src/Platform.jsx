@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import axios from 'axios';
+import AdminSupportPanel from './AdminSupport.jsx';
 
 const API = axios.create({ baseURL: '/api', withCredentials: true });
 // JWT is now in httpOnly cookie (set by server). CSRF token interceptor.
@@ -968,21 +969,23 @@ function Admin({ onLogout }) {
   const updWallet = async () => { try { await API.post('/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
 
   const tabLabel = (t) => {
-    if (t === 'requests') return (
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        📋 الطلبات
-        {totalPending > 0 && (
-          <span style={{
-            background: '#dc3545', color: '#fff', borderRadius: 10,
-            padding: '1px 7px', fontSize: 11, fontWeight: 'bold',
-            animation: 'badgePulse 1.5s infinite',
-          }}>{totalPending}</span>
-        )}
-      </span>
-    );
-    if (t === 'users') return '👥 المستخدمين';
-    if (t === 'settings') return '⚙️ الإعدادات';
-    return '📊 السجلات';
+  if (t === 'support') return '🎫 الدعم الفني';
+  if (t === 'requests') return (
+  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    📋 الطلبات
+    {totalPending > 0 && (
+      <span style={{
+        background: '#dc3545', color: '#fff', borderRadius: 10,
+        padding: '1px 7px', fontSize: 11, fontWeight: 'bold',
+        animation: 'badgePulse 1.5s infinite',
+      }}>{totalPending}</span>
+    )}
+  </span>
+  );
+  if (t === 'users') return '👥 المستخدمين';
+  if (t === 'settings') return '⚙️ الإعدادات';
+  if (t === 'logs') return '📊 السجلات';
+  return '';
   };
 
   return (
@@ -1010,7 +1013,7 @@ function Admin({ onLogout }) {
         <div style={s.stat(totalPending > 0 ? '#2a1a2a' : null)}><span>🔔 إجمالي معلق</span><strong style={{ color: totalPending > 0 ? '#ffc107' : 'var(--text)' }}>{totalPending}</strong></div>
       </div>
       <div className="tab-bar">
-        {['requests', 'users', 'settings', 'logs'].map(t => (
+        {['requests', 'support', 'users', 'settings', 'logs'].map(t => (
           <button key={t} className={`tab-btn ${tab === t ? 'tab-active' : 'tab-inactive'}`} onClick={() => { setTab(t); if (t === 'users') loadUsers(); if (t === 'logs') loadTxns(); }}>
             {tabLabel(t)}
           </button>
@@ -1018,6 +1021,7 @@ function Admin({ onLogout }) {
       </div>
       {msg && <div style={s.msg}>{msg}</div>}
       {tab === 'requests' && <div style={s.tc}><h3 style={{ color: '#28a745' }}>📥 طلبات الإيداع ({pendingDeposits})</h3>{(reqs.deposits || []).filter(d => d.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.deposits.filter(d => d.status === 'pending').map(d => (<div key={d.id} className="admin-req" style={{ borderRight: '3px solid #28a745', animation: 'reqSlideIn 0.3s ease' }}><div><strong>👤 {d.username}</strong> | ${d.amount} | <code style={{ fontSize: 11 }}>{d.txId}</code> | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(d.createdAt).toLocaleString('ar')}</span></div><div className="admin-actions"><button className="btn-approve" onClick={() => act(d.id, 'deposit', 'Approve')}>✅ موافقة</button><button className="btn-reject" onClick={() => act(d.id, 'deposit', 'Reject')}>❌ رفض</button></div></div>))}<h3 style={{ color: 'var(--danger)', marginTop: 20 }}>📤 طلبات السحب ({pendingWithdraws})</h3>{(reqs.withdraws || []).filter(w => w.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.withdraws.filter(w => w.status === 'pending').map(w => (<div key={w.id} className="admin-req" style={{ borderRight: '3px solid #dc3545', animation: 'reqSlideIn 0.3s ease' }}><div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.createdAt).toLocaleString('ar')}</span></div><div className="admin-actions"><button className="btn-approve" onClick={() => act(w.id, 'withdraw', 'Approve')}>💸 موافقة</button><button className="btn-reject" onClick={() => act(w.id, 'withdraw', 'Reject')}>❌ رفض</button></div></div>))}</div>}
+      {tab === 'support' && <AdminSupportPanel user={{ username: 'admin', isAdmin: true }} />}
       {tab === 'users' && <div style={s.tc}><h3>👥 المستخدمين ({users.length})</h3><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>المستخدم</th><th>الرصيد</th><th>الخطة</th><th>العمولات</th><th>الإحالات</th></tr></thead><tbody>{users.map(u => <tr key={u.username}><td>{u.username}</td><td>${Number(u.balance||0).toFixed(2)}</td><td>{u.activePlan || '—'}</td><td style={{ color: 'var(--accent)' }}>${Number(u.totalCommission||0).toFixed(2)}</td><td>{u.activeReferrals || 0}/{u.totalReferrals || 0}</td></tr>)}</tbody></table></div></div>}
       {tab === 'settings' && <div style={s.tc}><h3>⚙️ الإعدادات</h3><h4 style={{ marginTop: 15 }}>محفظة USDT</h4><input style={s.inp} value={nWallet} onChange={e => setNWallet(e.target.value)} placeholder="عنوان TRC20" /><button style={s.btn('#007bff')} onClick={updWallet}>تحديث</button></div>}
       {tab === 'logs' && <div style={s.tc}><h3>📊 السجلات ({txns.length})</h3>{txns.slice().reverse().map(t => (<div key={t.id} className="txn-row"><span>{t.type.includes('deposit') ? '📥' : t.type.includes('withdraw') ? '📤' : t.type.includes('commission') ? '💰' : t.type.includes('plan') ? '🏅' : '⚙️'} {t.type}</span><span>{t.username} | {t.amount > 0 ? `$${t.amount}` : ''}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(t.timestamp).toLocaleString('ar')}</span></div>))}</div>}

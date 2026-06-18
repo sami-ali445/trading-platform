@@ -8,7 +8,7 @@
     "build": "cd frontend && npm run build && cd .. && cp -r frontend/dist/* public/"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.108.2",
+    "@supabase/supabase-js": "^2.57.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -16,9 +16,9 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
+    "node-telegram-bot-api": "^1.1.0",
     "pg": "^8.16.0",
-    "uuid": "^14.0.0",
-    "@supabase/supabase-js": "^2.57.0"
+    "uuid": "^14.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
