@@ -14,13 +14,15 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
           CREATE TABLE IF NOT EXISTS support_tickets (
             id SERIAL PRIMARY KEY,
             ticket_id VARCHAR(36) UNIQUE NOT NULL,
-            telegram_chat_id BIGINT NOT NULL,
+            telegram_chat_id BIGINT,
             telegram_username VARCHAR(255),
+            username VARCHAR(255),
             user_message TEXT NOT NULL,
             bot_reply TEXT,
             admin_reply TEXT,
             status VARCHAR(20) DEFAULT 'open',
             category VARCHAR(50) DEFAULT 'general',
+            source VARCHAR(20) DEFAULT 'web',
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(),
             resolved_at TIMESTAMP
@@ -52,16 +54,16 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
     try {
       const { ticketId, telegramChatId, telegramUsername, message, category } = req.body;
       
-      if (!ticketId || !telegramChatId || !message) {
+      if (!ticketId || !message) {
         return res.status(400).json({ success: false, message: 'Missing required fields' });
       }
       
       await withDb(async (c) => {
         await c.query(
-          `INSERT INTO support_tickets (ticket_id, telegram_chat_id, telegram_username, user_message, category, status)
-           VALUES ($1, $2, $3, $4, $5, 'open')
+          `INSERT INTO support_tickets (ticket_id, telegram_chat_id, telegram_username, user_message, category, status, source)
+           VALUES ($1, $2, $3, $4, $5, 'open', 'telegram')
            ON CONFLICT (ticket_id) DO UPDATE SET updated_at = NOW()`,
-          [ticketId, telegramChatId, telegramUsername || null, message, category || 'general']
+          [ticketId, telegramChatId || null, telegramUsername || null, message, category || 'general']
         );
       });
       
@@ -95,6 +97,125 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       res.json({ success: true });
     } catch (err) {
       console.error('[SUPPORT] Add message:', err.message);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  });
+
+  // ============ USER ENDPOINTS (authenticated) ============
+
+  // Get user's active ticket
+  app.get('/api/user/support/ticket', authenticateToken, async (req, res) => {
+    try {
+      const ticket = await withDb(async (c) => {
+        const { rows } = await c.query(
+          `SELECT * FROM support_tickets 
+           WHERE username = $1 AND status = 'open' 
+           ORDER BY created_at DESC LIMIT 1`,
+          [req.user.username]
+        );
+        return rows[0];
+      });
+
+      if (!ticket) {
+        return res.json({ success: true, ticket: null, messages: [] });
+      }
+
+      const messages = await withDb(async (c) => {
+        const { rows } = await c.query(
+          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          [ticket.ticket_id]
+        );
+        return rows;
+      });
+
+      res.json({ success: true, ticket, messages: messages || [] });
+    } catch (err) {
+      console.error('[SUPPORT] Get user ticket:', err.message);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  });
+
+  // User sends a message (creates ticket if needed)
+  app.post('/api/user/support/message', authenticateToken, async (req, res) => {
+    try {
+      const { message, ticketId } = req.body;
+      if (!message || !message.trim()) {
+        return res.status(400).json({ success: false, message: 'Message required' });
+      }
+
+      let activeTicketId = ticketId;
+
+      // If no ticketId, find or create one
+      if (!activeTicketId) {
+        const existing = await withDb(async (c) => {
+          const { rows } = await c.query(
+            `SELECT ticket_id FROM support_tickets 
+             WHERE username = $1 AND status = 'open' 
+             ORDER BY created_at DESC LIMIT 1`,
+            [req.user.username]
+          );
+          return rows[0];
+        });
+
+        if (existing) {
+          activeTicketId = existing.ticket_id;
+        } else {
+          // Create new ticket
+          const crypto = require('crypto');
+          activeTicketId = 'WEB-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+          await withDb(async (c) => {
+            await c.query(
+              `INSERT INTO support_tickets (ticket_id, username, user_message, category, status, source)
+               VALUES ($1, $2, $3, 'general', 'open', 'web')`,
+              [activeTicketId, req.user.username, message.trim()]
+            );
+          });
+        }
+      }
+
+      // Save message
+      await withDb(async (c) => {
+        await c.query(
+          `INSERT INTO support_messages (ticket_id, sender, message) VALUES ($1, 'user', $2)`,
+          [activeTicketId, message.trim()]
+        );
+        await c.query(
+          `UPDATE support_tickets SET updated_at = NOW() WHERE ticket_id = $1`,
+          [activeTicketId]
+        );
+      });
+
+      res.json({ success: true, ticketId: activeTicketId });
+    } catch (err) {
+      console.error('[SUPPORT] User message:', err.message);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  });
+
+  // User creates a new ticket (closes old one if exists)
+  app.post('/api/user/support/new-ticket', authenticateToken, async (req, res) => {
+    try {
+      const crypto = require('crypto');
+      const newTicketId = 'WEB-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+
+      await withDb(async (c) => {
+        // Close old tickets
+        await c.query(
+          `UPDATE support_tickets SET status = 'closed', resolved_at = NOW() 
+           WHERE username = $1 AND status = 'open'`,
+          [req.user.username]
+        );
+        // Create new
+        await c.query(
+          `INSERT INTO support_tickets (ticket_id, username, user_message, category, status, source)
+           VALUES ($1, $2, 'فتح تذكرة جديدة', 'general', 'open', 'web')`,
+          [newTicketId, req.user.username]
+        );
+      });
+
+      res.json({ success: true, ticketId: newTicketId });
+    } catch (err) {
+      console.error('[SUPPORT] New ticket:', err.message);
       res.status(500).json({ success: false, message: 'Server error' });
     }
   });

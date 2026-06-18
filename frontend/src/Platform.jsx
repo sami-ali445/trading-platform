@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import axios from 'axios';
 import AdminSupportPanel from './AdminSupport.jsx';
+import SupportChat from './SupportChat.jsx';
 
 const API = axios.create({ baseURL: '/api', withCredentials: true });
 // JWT is now in httpOnly cookie (set by server). CSRF token interceptor.
@@ -825,8 +826,8 @@ function Dashboard({ user: initUser, onLogout }) {
     { key: 'wallet', label: '💰 المحفظة' }, { key: 'analytics', label: '📈 التحليلات' },
     { key: 'converter', label: '🔄 المحول' }, { key: 'deposit', label: '📥 إيداع' },
     { key: 'withdraw', label: '📤 سحب' }, { key: 'tiers', label: '🏅 الخطط' },
-    { key: 'referrals', label: '🕸️ الإحالة' }, { key: 'faq', label: '📚 المساعدة' },
-    { key: 'history', label: '📋 السجل' },
+    { key: 'referrals', label: '🕸️ الإحالة' }, { key: 'support', label: '🎧 الدعم الفني' },
+    { key: 'faq', label: '📚 المساعدة' }, { key: 'history', label: '📋 السجل' },
   ];
 
   return (
@@ -922,6 +923,7 @@ function Dashboard({ user: initUser, onLogout }) {
       </div>)}
 
       {tab === 'history' && (<div style={s.tc}><h3>📋 سجل المعاملات</h3>{txns.length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد معاملات.</p> : txns.slice().reverse().map(t => (<div key={t.id} className="txn-row"><span>{t.type.includes('deposit') ? '📥' : t.type.includes('withdraw') ? '📤' : t.type.includes('commission') ? '💰' : t.type.includes('plan') ? '🏅' : '⚙️'} {t.type}</span><span>{t.amount > 0 ? `$${t.amount}` : ''}</span><span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(t.timestamp).toLocaleString('ar')}</span></div>))}</div>)}
+      {tab === 'support' && <SupportChat user={user} API={API} />}
     </div>
   );
 }
