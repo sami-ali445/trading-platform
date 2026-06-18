@@ -1076,3 +1076,4 @@ app.use((err, req, res, next) => { console.error('[ERROR]', err.message); res.st
 // ============ START ============
 const server = app.listen(PORT, '0.0.0.0', () => { console.log('Trading Platform v5.8 - Tier Isolation System running on port ' + PORT); });
 server.keepAliveTimeout = 65000; server.headersTimeout = 66000;
+// Force rebuild Fri Jun 19 01:42:40 AM EEST 2026
