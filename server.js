@@ -1058,12 +1058,36 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
   console.log('[TELEGRAM] No bot token - support bot disabled');
 }
 
-// ============ STATIC FILES ============
+// ============ AUTO-BUILD FRONTEND ============
+// Build frontend on startup if public folder is stale
 const PUBLIC_DIR = path.join(__dirname, 'public');
+(function autoBuild() {
+  try {
+    const publicHtml = path.join(PUBLIC_DIR, 'index.html');
+    if (fs.existsSync(publicHtml)) {
+      const content = fs.readFileSync(publicHtml, 'utf8');
+      if (content.includes('index-D7tkmS00')) {
+        console.log('[AUTO-BUILD] Stale build detected, rebuilding frontend...');
+        const { execSync } = require('child_process');
+        execSync('cd frontend && npm run build && cp -r dist/* ../public/', { stdio: 'inherit', timeout: 120000 });
+        console.log('[AUTO-BUILD] Frontend rebuilt OK');
+      }
+    }
+  } catch (e) {
+    console.error('[AUTO-BUILD] Failed:', e.message);
+  }
+})();
+
+// ============ STATIC FILES ============
+
+// Serve static assets with no-cache
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));
+
+// SPA catch-all (exclude /api/ and /assets/)
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/') && !req.path.startsWith('/assets/')) {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
     res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
   } else {
     next();
