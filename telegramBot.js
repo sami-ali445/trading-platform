@@ -11,7 +11,7 @@
 
 const TelegramBot = require('node-telegram-bot-api');
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:AAFTfDRE9qQeCgtGPEZEZCGO30Rrb5JD1zc';
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID; // Your personal Telegram chat ID for notifications
 
 if (!BOT_TOKEN) {
