@@ -1178,9 +1178,9 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // Serve static assets with no-cache
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0'); res.set('Pragma', 'no-cache'); } }));
 
-// SPA catch-all (exclude /api/ and /assets/)
+// SPA catch-all (exclude /api/, /assets/, and /webhook/)
 app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/') && !req.path.startsWith('/assets/')) {
+  if (!req.path.startsWith('/api/') && !req.path.startsWith('/assets/') && !req.path.startsWith('/webhook/')) {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.set('Pragma', 'no-cache');
     // Read index.html and inline the JS/CSS
