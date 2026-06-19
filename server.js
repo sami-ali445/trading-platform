@@ -367,8 +367,10 @@ function isTokenBlacklisted(t) { return tokenBlacklist.has(t); }
 function blacklistToken(t) { try { const d = jwt.decode(t); tokenBlacklist.set(t, d && d.exp ? d.exp * 1000 : Date.now() + 86400000); } catch { tokenBlacklist.set(t, Date.now() + 86400000); } }
 function generateToken(p, req) {
   // Add session fingerprint to prevent token theft/ghost sessions
+  // Use X-Forwarded-For for real client IP behind proxy (Render)
+  const clientIP = req?.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req?.ip;
   const fingerprint = crypto.createHash('sha256')
-    .update((req?.headers['user-agent'] || '') + (req?.ip || ''))
+    .update((req?.headers?.['user-agent'] || '') + (clientIP || ''))
     .digest('hex')
     .substring(0, 16);
   return jwt.sign({ ...p, fp: fingerprint }, JWT_SECRET, { expiresIn: '24h' });
@@ -384,14 +386,20 @@ function authenticateToken(req, res, next) {
   if (isTokenBlacklisted(t)) return res.status(403).json({ success: false, message: 'Token revoked.' });
   jwt.verify(t, JWT_SECRET, (err, u) => {
     if (err) return res.status(403).json({ success: false, message: 'Invalid token.' });
-    // Verify session fingerprint - prevents ghost/hack sessions
+    // Verify session fingerprint - use X-Forwarded-For for real client IP behind proxy
+    const clientIP = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
     const currentFp = crypto.createHash('sha256')
-      .update((req.headers['user-agent'] || '') + (req.ip || ''))
+      .update((req.headers['user-agent'] || '') + (clientIP || ''))
       .digest('hex')
       .substring(0, 16);
     if (u.fp && u.fp !== currentFp) {
-      logAttack('GHOST_SESSION', req.ip, 'User: ' + u.username + ' FP mismatch');
-      return res.status(403).json({ success: false, message: 'Session invalid. Please login again.' });
+      // Only reject if both UA and IP are completely different (allow IP changes for mobile networks)
+      const storedUA = u.fp.substring(0, 8);
+      const currentUA = crypto.createHash('sha256').update(req.headers['user-agent'] || '').digest('hex').substring(0, 8);
+      if (storedUA !== currentUA) {
+        logAttack('GHOST_SESSION', clientIP, 'User: ' + u.username + ' FP mismatch');
+        return res.status(403).json({ success: false, message: 'Session invalid. Please login again.' });
+      }
     }
     req.user = { username: u.username, role: u.role };
     next();
