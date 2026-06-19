@@ -212,7 +212,9 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
         const webMsg = `💬 *رسالة دعم جديدة من الموقع*\n\n` +
           `👤 المستخدم: ${req.user.username}\n` +
           `📝 الرسالة:\n_${message.trim()}_`;
-        await tgSendMessage(adminTelegramId, webMsg).catch(() => {});
+        console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
+        await tgSendMessage(adminTelegramId, webMsg);
+        console.log('[SUPPORT] Telegram sent OK');
       } catch (e) {
         console.error('[SUPPORT] Bot send failed:', e.message);
       }
