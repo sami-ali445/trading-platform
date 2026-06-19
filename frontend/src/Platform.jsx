@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, createContext, useCont
 import axios from 'axios';
 import AdminSupportPanel from './AdminSupport.jsx';
 import SupportChat from './SupportChat.jsx';
+import SupportWidget from './SupportWidget.jsx';
 
 const API = axios.create({ baseURL: '/api', withCredentials: true });
 // JWT is now in httpOnly cookie (set by server). CSRF token interceptor.
@@ -624,6 +625,7 @@ export default function Platform() {
         {view === 'dashboard' && user && <><Dashboard user={user} onLogout={logout} /><WithdrawalTicker /></>}
         {view === 'admin' && user && <Admin onLogout={logout} />}
         {!['landing','login','register','admin-login','dashboard','admin'].includes(view) && <><Landing onNav={setView} /><WithdrawalTicker /></>}
+        <SupportWidget user={user} API={API} />
       </ToastProvider>
     </ThemeProvider>
   );

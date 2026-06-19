@@ -392,7 +392,7 @@ function authenticateToken(req, res, next) {
 function requireAdmin(req, res, next) { if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only.' }); next(); }
 
 // ============ HEALTH ============
-app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '5.8', db: dbConnected, ts: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '5.9.1', db: dbConnected, ts: new Date().toISOString() }));
 
 // ============ AUTH ============
 app.post('/api/auth/register', authLimiter, async (req, res) => {
