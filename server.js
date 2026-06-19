@@ -1059,19 +1059,18 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 }
 
 // ============ AUTO-BUILD FRONTEND ============
-// Build frontend on startup if public folder is stale
+// Build frontend on startup if public folder is missing or stale
 const PUBLIC_DIR = path.join(__dirname, 'public');
 (function autoBuild() {
   try {
     const publicHtml = path.join(PUBLIC_DIR, 'index.html');
-    if (fs.existsSync(publicHtml)) {
-      const content = fs.readFileSync(publicHtml, 'utf8');
-      if (content.includes('index-D7tkmS00')) {
-        console.log('[AUTO-BUILD] Stale build detected, rebuilding frontend...');
-        const { execSync } = require('child_process');
-        execSync('cd frontend && npm run build && cp -r dist/* ../public/', { stdio: 'inherit', timeout: 120000 });
-        console.log('[AUTO-BUILD] Frontend rebuilt OK');
-      }
+    if (!fs.existsSync(publicHtml)) {
+      console.log('[AUTO-BUILD] No public folder, rebuilding frontend...');
+      const { execSync } = require('child_process');
+      execSync('cd frontend && npm run build && cp -r dist/* ../public/', { stdio: 'inherit', timeout: 120000 });
+      console.log('[AUTO-BUILD] Frontend rebuilt OK');
+    } else {
+      console.log('[AUTO-BUILD] Public folder exists, skipping rebuild');
     }
   } catch (e) {
     console.error('[AUTO-BUILD] Failed:', e.message);
