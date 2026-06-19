@@ -1064,13 +1064,24 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 (function autoBuild() {
   try {
     const publicHtml = path.join(PUBLIC_DIR, 'index.html');
-    if (!fs.existsSync(publicHtml)) {
-      console.log('[AUTO-BUILD] No public folder, rebuilding frontend...');
+    // Rebuild if index.html references old bundle or doesn't exist
+    let needsRebuild = !fs.existsSync(publicHtml);
+    if (!needsRebuild) {
+      const html = fs.readFileSync(publicHtml, 'utf8');
+      // If index.html references a JS file that doesn't exist in public/assets, rebuild
+      const jsMatch = html.match(/src="\/assets\/(index-[A-Za-z0-9]+\.js)"/);
+      if (jsMatch) {
+        const jsFile = path.join(PUBLIC_DIR, 'assets', jsMatch[1]);
+        if (!fs.existsSync(jsFile)) needsRebuild = true;
+      }
+    }
+    if (needsRebuild) {
+      console.log('[AUTO-BUILD] Rebuilding frontend...');
       const { execSync } = require('child_process');
       execSync('cd frontend && npm run build && cp -r dist/* ../public/', { stdio: 'inherit', timeout: 120000 });
       console.log('[AUTO-BUILD] Frontend rebuilt OK');
     } else {
-      console.log('[AUTO-BUILD] Public folder exists, skipping rebuild');
+      console.log('[AUTO-BUILD] Public folder up to date, skipping rebuild');
     }
   } catch (e) {
     console.error('[AUTO-BUILD] Failed:', e.message);
