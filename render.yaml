@@ -3,7 +3,7 @@ services:
     name: trading-platform
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && echo "Frontend pre-built, skipping build"
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:

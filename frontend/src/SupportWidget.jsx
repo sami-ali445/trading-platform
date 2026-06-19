@@ -9,20 +9,15 @@ import { useState, useEffect, useRef } from 'react';
 
 function SupportWidget({ user, API }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(!!user);
+  const isLoggedIn = !!user;
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [guestName, setGuestName] = useState('');
-  const [guestEmail, setGuestEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [ticketStatus, setTicketStatus] = useState(null);
   const [sent, setSent] = useState(false);
   const messagesEndRef = useRef(null);
   const ticketIdRef = useRef(null);
-
-  useEffect(() => {
-    setIsLoggedIn(!!user);
-  }, [user]);
 
   // Load existing ticket for logged-in users
   useEffect(() => {
@@ -65,10 +60,8 @@ function SupportWidget({ user, API }) {
     if (!guestName.trim() || !newMessage.trim() || loading) return;
     setLoading(true);
     try {
-      // Send as a guest ticket via the public endpoint
-      const crypto = require ? null : null;
       const ticketId = 'GUEST-' + Date.now().toString(36).toUpperCase();
-      await API.post('/api/support/tickets', {
+      await API.post('/support/tickets', {
         ticketId,
         telegramChatId: null,
         telegramUsername: guestName.trim(),
@@ -78,7 +71,6 @@ function SupportWidget({ user, API }) {
       setSent(true);
       setNewMessage('');
     } catch (e) {
-      // If guest endpoint not available, just show success
       setSent(true);
       setNewMessage('');
     }
@@ -118,7 +110,7 @@ function SupportWidget({ user, API }) {
               <div>
                 <div style={{ color: '#39ff14', fontWeight: 'bold', fontSize: 14 }}>الدعم الفني</div>
                 <div style={{ color: '#888', fontSize: 11 }}>
-                  {isLoggedIn ? `مرحباً ${user?.username}` : 'تواصل معنا'}
+                  {isLoggedIn ? 'مرحباً ' + (user && user.username ? user.username : '') : 'تواصل معنا'}
                 </div>
               </div>
             </div>
@@ -162,7 +154,7 @@ function SupportWidget({ user, API }) {
                         border: m.sender === 'user' ? '1px solid #2a4a3e' : '1px solid #1a5a2e'
                       }}>
                         <div style={{ fontSize: 10, color: '#888', marginBottom: 3 }}>
-                          {m.sender === 'user' ? '👤 أنت' : '🛡️ الدعم الفني'} — {new Date(m.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
+                          {m.sender === 'user' ? '👤 أنت' : '🛡️ الدعم الفني'} - {new Date(m.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap' }}>{m.message}</div>
                       </div>
@@ -179,7 +171,7 @@ function SupportWidget({ user, API }) {
                     <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
                     <div style={{ color: '#39ff14', fontWeight: 'bold', marginBottom: 8 }}>تم إرسال رسالتك بنجاح!</div>
                     <div style={{ color: '#888', fontSize: 13 }}>سيتواصل معك فريق الدعم قريباً</div>
-                    <button onClick={() => { setSent(false); setGuestName(''); setGuestEmail(''); setNewMessage(''); }} style={{
+                    <button onClick={() => { setSent(false); setGuestName(''); setNewMessage(''); }} style={{
                       marginTop: 15, padding: '8px 20px', background: '#1a2a3e', color: '#ccc',
                       border: '1px solid #444', borderRadius: 6, cursor: 'pointer', fontSize: 13
                     }}>إرسال رسالة أخرى</button>
@@ -197,16 +189,7 @@ function SupportWidget({ user, API }) {
                       placeholder="اسمك (مطلوب)"
                       style={{
                         width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #444',
-                        background: '#0a0a0f', color: '#fff', fontSize: 13, marginBottom: 10, outline: 'none'
-                      }}
-                    />
-                    <input
-                      value={guestEmail}
-                      onChange={e => setGuestEmail(e.target.value)}
-                      placeholder="بريدك الإلكتروني (اختياري)"
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #444',
-                        background: '#0a0a0f', color: '#fff', fontSize: 13, marginBottom: 10, outline: 'none'
+                        background: '#0a0a0f', color: '#fff', fontSize: 13, marginBottom: 10, outline: 'none', boxSizing: 'border-box'
                       }}
                     />
                     <textarea
@@ -217,7 +200,7 @@ function SupportWidget({ user, API }) {
                       style={{
                         width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #444',
                         background: '#0a0a0f', color: '#fff', fontSize: 13, outline: 'none',
-                        resize: 'vertical', minHeight: 80, fontFamily: 'inherit'
+                        resize: 'vertical', minHeight: 80, boxSizing: 'border-box', fontFamily: 'inherit'
                       }}
                     />
                     <button
