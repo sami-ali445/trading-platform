@@ -3,7 +3,7 @@ services:
     name: trading-platform
     runtime: node
     plan: free
-    buildCommand: npm install && cd frontend && npm install && npm run build && cd .. && rm -rf public/assets/* && cp -r frontend/dist/assets/* public/assets/ && cp frontend/dist/index.html public/index.html
+    buildCommand: npm install && npm run build
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:
@@ -15,5 +15,3 @@ services:
         generateValue: true
       - key: ALLOWED_ORIGIN
         value: "https://trading-platform-iglr.onrender.com"
-      - key: FORCE_REBUILD
-        value: "2026-06-21T01"

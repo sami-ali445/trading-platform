@@ -5,8 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist/* public/",
-    "postinstall": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist/* public/"
+    "build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/dist/* public/"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
