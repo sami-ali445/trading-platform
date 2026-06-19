@@ -304,6 +304,7 @@ async function closeTicket(ticketId) {
 function setupWebhook(app, webhookPath = '/webhook/telegram') {
   // Webhook endpoint
   app.post(webhookPath, express.json(), (req, res) => {
+    console.log('[WEBHOOK] Received:', JSON.stringify(req.body).substring(0, 200));
     bot.processUpdate(req.body);
     res.sendStatus(200);
   });
