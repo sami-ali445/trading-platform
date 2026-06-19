@@ -3,7 +3,7 @@ services:
     name: trading-platform
     runtime: node
     plan: free
-    buildCommand: echo "Using pre-built frontend"
+    buildCommand: npm install && cd frontend && npm install && npm run build && cd .. && rm -rf public/assets/* && cp -r frontend/dist/assets/* public/assets/ && cp frontend/dist/index.html public/index.html
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:
