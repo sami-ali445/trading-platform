@@ -11,15 +11,18 @@ function SupportChat({ user, API }) {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [ticketStatus, setTicketStatus] = useState(null);
+  const [error, setError] = useState(null);
   const messagesEndRef = useRef(null);
   const ticketIdRef = useRef(null);
 
   // Load existing ticket messages
   useEffect(() => {
+    if (!API) return;
     loadTicket();
   }, []);
 
   const loadTicket = async () => {
+    if (!API) return;
     try {
       const { data } = await API.get('/user/support/ticket');
       if (data.success && data.ticket) {
@@ -57,7 +60,7 @@ function SupportChat({ user, API }) {
   useEffect(scrollToBottom, [messages]);
 
   return (
-    <div style={s.tc}>
+    <div style={{ background: 'var(--bg3)', padding: 20, borderRadius: 12, border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
         <h3 style={{ color: '#39ff14' }}>🎧 الدعم الفني</h3>
         {ticketStatus && (
