@@ -145,6 +145,17 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 
       let activeTicketId = ticketId;
 
+      // Get user's telegram info
+      const userInfo = await withDb(async (c) => {
+        const { rows } = await c.query(
+          'SELECT telegram_id, telegram_username FROM users WHERE username = $1',
+          [req.user.username]
+        );
+        return rows[0];
+      });
+      const userTelegramId = userInfo?.telegram_id || null;
+      const userTelegramUsername = userInfo?.telegram_username || null;
+
       // If no ticketId, find or create one
       if (!activeTicketId) {
         const existing = await withDb(async (c) => {
@@ -159,15 +170,24 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 
         if (existing) {
           activeTicketId = existing.ticket_id;
+          // Update ticket with telegram info if user has it and ticket doesn't
+          if (userTelegramId) {
+            await withDb(async (c) => {
+              await c.query(
+                `UPDATE support_tickets SET telegram_chat_id = COALESCE(telegram_chat_id, $1), telegram_username = COALESCE(telegram_username, $2) WHERE ticket_id = $3`,
+                [userTelegramId, userTelegramUsername, activeTicketId]
+              );
+            });
+          }
         } else {
           // Create new ticket
           const crypto = require('crypto');
           activeTicketId = 'WEB-' + crypto.randomBytes(4).toString('hex').toUpperCase();
           await withDb(async (c) => {
             await c.query(
-              `INSERT INTO support_tickets (ticket_id, username, user_message, category, status, source)
-               VALUES ($1, $2, $3, 'general', 'open', 'web')`,
-              [activeTicketId, req.user.username, message.trim()]
+              `INSERT INTO support_tickets (ticket_id, telegram_chat_id, telegram_username, username, user_message, category, status, source)
+               VALUES ($1, $2, $3, $4, $5, 'general', 'open', 'web')`,
+              [activeTicketId, userTelegramId, userTelegramUsername, req.user.username, message.trim()]
             );
           });
         }
@@ -184,6 +204,18 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
           [activeTicketId]
         );
       });
+
+      // Notify admin via Telegram if user has telegram linked
+      if (userTelegramId) {
+        try {
+          const { notifyAdmin } = require('../telegramBot');
+          if (notifyAdmin) {
+            await notifyAdmin(activeTicketId, { id: userTelegramId, username: req.user.username }, message.trim(), 'general');
+          }
+        } catch (e) {
+          console.error('[SUPPORT] Telegram notify failed:', e.message);
+        }
+      }
 
       res.json({ success: true, ticketId: activeTicketId });
     } catch (err) {
@@ -330,16 +362,19 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
         );
       });
       
-      // Forward to Telegram user
+      // Forward to Telegram user (works for both web and telegram tickets)
       try {
         const { adminReply } = require('../telegramBot');
         if (adminReply) {
-          await adminReply(ticketId, message);
+          const result = await adminReply(ticketId, message);
+          if (!result?.success) {
+            console.error('[SUPPORT] Telegram forward result:', result?.error || 'unknown error');
+          }
         }
       } catch (e) {
         console.error('[SUPPORT] Telegram forward failed:', e.message);
       }
-      
+
       res.json({ success: true, message: 'Reply sent' });
     } catch (err) {
       console.error('[SUPPORT] Reply:', err.message);

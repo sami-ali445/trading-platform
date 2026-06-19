@@ -251,6 +251,28 @@ async function adminReply(ticketId, message) {
     console.error('[TELEGRAM] DB lookup failed:', e.message);
   }
 
+  // Fallback: try to find user's telegram_id from users table via ticket username
+  try {
+    const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const resp = await fetch(`${apiUrl}/api/admin/support/tickets/${ticketId}`);
+    const data = await resp.json();
+    if (data.success && data.ticket && data.ticket.username) {
+      // Get user's telegram info from users table
+      const userResp = await fetch(`${apiUrl}/api/admin/users`);
+      const userData = await userResp.json();
+      if (userData.success && userData.users) {
+        const targetUser = userData.users.find(u => u.username === data.ticket.username);
+        if (targetUser && targetUser.telegram_id) {
+          await bot.sendMessage(targetUser.telegram_id, `💬 *رد من فريق الدعم:*\n\n${message}`, { parse_mode: 'Markdown' });
+          // Update ticket with telegram_chat_id for future use
+          return { success: true };
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[TELEGRAM] User lookup fallback failed:', e.message);
+  }
+
   return { error: 'Ticket not found or no Telegram chat ID' };
 }
 

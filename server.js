@@ -186,7 +186,7 @@ function getDailyProfit(a) { return getWeeklyProfit(a) / 7; }
 let pgPool = null;
 let dbConnected = false;
 
-(function initDB() {
+(async function initDB() {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) { console.error('[DB] FATAL: DATABASE_URL not set!'); process.exit(1); }
   try {
@@ -210,6 +210,13 @@ let dbConnected = false;
       console.error('[DB] Connection test failed:', e.code, e.message);
       dbConnected = false;
     });
+    // Add telegram columns if missing
+    await pgPool.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS telegram_id BIGINT,
+      ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)
+    `);
+    console.log('[DB] Telegram columns verified');
   } catch(e) {
     console.error('[DB] Init failed:', e.message);
   }
@@ -495,6 +502,84 @@ app.post('/api/auth/logout', authenticateToken, (req, res) => {
   const ht = req.headers['authorization'] && req.headers['authorization'].split(' ')[1];
   const t = ct || ht; if (t) blacklistToken(t);
   clearTokenCookie(res); res.json({ success: true, message: 'Logged out.' });
+});
+
+// ============ TELEGRAM LINKING ============
+app.post('/api/user/telegram/link', authenticateToken, async (req, res) => {
+  try {
+    const { telegramId, telegramUsername } = req.body;
+    if (!telegramId && !telegramUsername) {
+      return res.status(400).json({ success: false, message: 'Provide telegramId or telegramUsername' });
+    }
+    
+    // Validate telegramId is a number if provided
+    let tid = null;
+    if (telegramId) {
+      tid = parseInt(telegramId);
+      if (isNaN(tid) || tid <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid Telegram ID' });
+      }
+    }
+    
+    // Normalize username (remove @ if present)
+    let username = (telegramUsername || '').trim().replace(/^@/, '');
+    
+    await withDb(async (c) => {
+      await c.query(
+        'UPDATE users SET telegram_id = COALESCE($1, telegram_id), telegram_username = COALESCE($2, telegram_username) WHERE username = $3',
+        [tid, username || null, req.user.username]
+      );
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Telegram account linked successfully',
+      telegramId: tid,
+      telegramUsername: username
+    });
+  } catch (err) {
+    console.error('[TELEGRAM LINK]', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Get telegram link status
+app.get('/api/user/telegram/status', authenticateToken, async (req, res) => {
+  try {
+    const user = await withDb(async (c) => {
+      const { rows } = await c.query(
+        'SELECT telegram_id, telegram_username FROM users WHERE username = $1',
+        [req.user.username]
+      );
+      return rows[0];
+    });
+    
+    res.json({
+      success: true,
+      linked: !!(user?.telegram_id || user?.telegram_username),
+      telegramId: user?.telegram_id || null,
+      telegramUsername: user?.telegram_username || null
+    });
+  } catch (err) {
+    console.error('[TELEGRAM STATUS]', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Unlink telegram
+app.delete('/api/user/telegram/link', authenticateToken, async (req, res) => {
+  try {
+    await withDb(async (c) => {
+      await c.query(
+        'UPDATE users SET telegram_id = NULL, telegram_username = NULL WHERE username = $1',
+        [req.user.username]
+      );
+    });
+    res.json({ success: true, message: 'Telegram account unlinked' });
+  } catch (err) {
+    console.error('[TELEGRAM UNLINK]', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
 app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
