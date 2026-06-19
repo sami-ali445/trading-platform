@@ -1,16 +1,16 @@
 /**
- * Telegram Support Bot v1.0
+ * Telegram Support Bot v2.0
  * 
  * Features:
  * - Auto-reply with FAQ
  * - Escalate to human support (admin)
- * - Anonymous: user only sees "bot" responses
+ * - Admin detection: if chat_id = admin, treat as admin reply (not a new ticket)
  * - Admin gets notified via Telegram with user ticket info
- * - Admin replies from web panel, bot forwards to user
+ * - Admin replies from web panel OR from Telegram -> bot forwards to user
  */
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:***';
-const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
+const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '8916948567';
 
 if (!BOT_TOKEN) {
   console.error('[TELEGRAM] FATAL: TELEGRAM_BOT_TOKEN not set!');
@@ -38,8 +38,13 @@ async function setWebhook(url) {
 
 async function processUpdate(update) {
   if (update.message) {
-    await handleUserMessage(update.message);
+    await handleMessage(update.message);
   }
+}
+
+// ============ ADMIN DETECTION ============
+function isAdmin(chatId) {
+  return String(chatId) === String(ADMIN_TELEGRAM_ID);
 }
 
 // ============ FAQ KNOWLEDGE BASE ============
@@ -100,6 +105,57 @@ async function notifyAdmin(ticketId, userInfo, message, category) {
   }
 }
 
+// Handle admin message -> forward to user's ticket as admin reply
+async function handleAdminMessage(msg) {
+  const text = msg.text || '';
+  const chatId = msg.chat.id;
+
+  // Admin replied to a specific ticket via web panel (adminReply API handles that)
+  // If admin sends a message directly to the bot, check if there's an active ticket
+  // and treat it as a reply to the most recent open ticket
+
+  console.log('[BOT] Admin message received:', text.substring(0, 100));
+
+  // Find the most recent active ticket to reply to
+  if (activeTickets.size > 0) {
+    // Get the most recent ticket
+    let latestTicket = null;
+    let latestTime = 0;
+    for (const [ticketChatId, ticket] of activeTickets.entries()) {
+      if (ticket.status === 'open' && ticket.createdAt > latestTime) {
+        latestTime = ticket.createdAt;
+        latestTicket = { chatId: ticketChatId, ...ticket };
+      }
+    }
+
+    if (latestTicket) {
+      // Forward admin's message to the user
+      try {
+        await sendMessage(latestTicket.chatId, `💬 *رد من فريق الدعم:*\n\n${text}`);
+        console.log(`[BOT] Admin reply forwarded to user ${latestTicket.chatId}`);
+      } catch (e) {
+        console.error('[BOT] Forward to user failed:', e.message);
+      }
+
+      // Save to DB via API
+      try {
+        const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+        await fetch(`${apiUrl}/api/support/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text })
+        });
+      } catch (e) {}
+
+      return;
+    }
+  }
+
+  // No active tickets - just acknowledge
+  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.`);
+}
+
+// Handle user (non-admin) message
 async function handleUserMessage(msg) {
   const chatId = msg.chat.id;
   const text = msg.text || '';
@@ -153,6 +209,19 @@ async function handleUserMessage(msg) {
   }
 
   return createTicket(chatId, userId, username, text, 'general');
+}
+
+// Main message handler - routes to admin or user handler
+async function handleMessage(msg) {
+  const chatId = msg.chat.id;
+
+  if (isAdmin(chatId)) {
+    // Admin message -> don't open ticket, treat as reply
+    await handleAdminMessage(msg);
+  } else {
+    // User message -> normal flow (FAQ, ticket, etc)
+    await handleUserMessage(msg);
+  }
 }
 
 async function createTicket(chatId, userId, username, message, category) {
@@ -232,7 +301,7 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
     });
   }
 
-  console.log('[TELEGRAM] Bot initialized');
+  console.log('[TELEGRAM] Bot initialized. Admin ID:', ADMIN_TELEGRAM_ID);
 }
 
 // ============ EXPORTS ============
