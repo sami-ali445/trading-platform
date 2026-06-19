@@ -217,24 +217,11 @@ async function createTicket(chatId, userId, username, message, category) {
 
 // Admin replies to ticket - called from API
 async function adminReply(ticketId, message) {
-  // Find ticket by ID
+  // Find ticket in memory first
   for (const [chatId, ticket] of activeTickets.entries()) {
     if (ticket.ticketId === ticketId && ticket.status === 'open') {
       try {
         await bot.sendMessage(chatId, `💬 *رد من فريق الدعم:*\n\n${message}`, { parse_mode: 'Markdown' });
-        
-        // Save to DB
-        const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-        await fetch(`${apiUrl}/api/support/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ticketId,
-            sender: 'admin',
-            message
-          })
-        });
-        
         return { success: true };
       } catch (e) {
         console.error('[TELEGRAM] Admin reply failed:', e.message);
@@ -242,8 +229,29 @@ async function adminReply(ticketId, message) {
       }
     }
   }
-  
-  return { error: 'Ticket not found or closed' };
+
+  // If not found in memory, try DB via API
+  try {
+    const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const resp = await fetch(`${apiUrl}/api/admin/support/tickets/${ticketId}`);
+    const data = await resp.json();
+    if (data.success && data.ticket && data.ticket.telegram_chat_id) {
+      const chatId = data.ticket.telegram_chat_id;
+      await bot.sendMessage(chatId, `💬 *رد من فريق الدعم:*\n\n${message}`, { parse_mode: 'Markdown' });
+      // Re-add to memory
+      activeTickets.set(chatId, {
+        ticketId,
+        status: data.ticket.status,
+        category: data.ticket.category,
+        createdAt: Date.now()
+      });
+      return { success: true };
+    }
+  } catch (e) {
+    console.error('[TELEGRAM] DB lookup failed:', e.message);
+  }
+
+  return { error: 'Ticket not found or no Telegram chat ID' };
 }
 
 // Close ticket
