@@ -1131,18 +1131,13 @@ app.get('/api/admin/users/:username/tiers', authenticateToken, requireAdmin, asy
 const { setupSupportRoutes } = require('./supportRoutes');
 setupSupportRoutes(app, withDb, authenticateToken, requireAdmin);
 
-// Setup Telegram webhook (if token is set)
-console.log('[TELEGRAM] Token env var:', process.env.TELEGRAM_BOT_TOKEN ? 'SET (' + process.env.TELEGRAM_BOT_TOKEN.length + ' chars)' : 'NOT SET');
-if (process.env.TELEGRAM_BOT_TOKEN) {
-  try {
-    const { setupWebhook } = require('./telegramBot');
-    setupWebhook(app, '/webhook/telegram');
-    console.log('[TELEGRAM] Support bot enabled');
-  } catch (e) {
-    console.error('[TELEGRAM] Init failed:', e.message);
-  }
-} else {
-  console.log('[TELEGRAM] No bot token - support bot disabled');
+// Setup Telegram webhook (always enable - token is in telegramBot.js fallback)
+try {
+  const { setupWebhook } = require('./telegramBot');
+  setupWebhook(app, '/webhook/telegram');
+  console.log('[TELEGRAM] Support bot enabled');
+} catch (e) {
+  console.error('[TELEGRAM] Init failed:', e.message);
 }
 
 // ============ AUTO-BUILD FRONTEND ============
