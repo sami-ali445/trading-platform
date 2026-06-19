@@ -3,6 +3,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
 
 const API = axios.create({ baseURL: '/api', withCredentials: true });
 API.interceptors.request.use(c => {
