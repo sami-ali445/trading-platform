@@ -1098,7 +1098,27 @@ app.use((req, res, next) => {
   if (!req.path.startsWith('/api/') && !req.path.startsWith('/assets/')) {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.set('Pragma', 'no-cache');
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    // Read index.html and inline the JS/CSS
+    try {
+      const htmlPath = path.join(PUBLIC_DIR, 'index.html');
+      let html = fs.readFileSync(htmlPath, 'utf8');
+      // Inline JS
+      const jsFiles = fs.readdirSync(path.join(PUBLIC_DIR, 'assets')).filter(f => f.endsWith('.js'));
+      if (jsFiles.length > 0) {
+        const jsContent = fs.readFileSync(path.join(PUBLIC_DIR, 'assets', jsFiles[0]), 'utf8');
+        html = html.replace(/<script[^>]*src="\/assets\/[^"]*"[^>]*><\/script>/, `<script type="module">${jsContent}</script>`);
+      }
+      // Inline CSS
+      const cssFiles = fs.readdirSync(path.join(PUBLIC_DIR, 'assets')).filter(f => f.endsWith('.css'));
+      if (cssFiles.length > 0) {
+        const cssContent = fs.readFileSync(path.join(PUBLIC_DIR, 'assets', cssFiles[0]), 'utf8');
+        html = html.replace(/<link[^>]*href="\/assets\/[^"]*\.css"[^>]*>/, `<style>${cssContent}</style>`);
+      }
+      res.send(html);
+    } catch (e) {
+      console.error('[INLINE] Error:', e.message);
+      res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    }
   } else {
     next();
   }
