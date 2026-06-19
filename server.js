@@ -77,6 +77,7 @@ app.use((req, res, next) => {
 
 function checkCsrf(req, res, next) {
   if (req.method === 'GET') return next();
+  if (req.path.startsWith('/webhook/')) return next();
   const clientToken = req.headers['x-csrf-token'] || req.body?._csrf;
   const cookieToken = req.cookies?.csrf_token;
   if (req.path.startsWith('/api/auth/')) return next();
