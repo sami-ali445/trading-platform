@@ -1132,6 +1132,7 @@ const { setupSupportRoutes } = require('./supportRoutes');
 setupSupportRoutes(app, withDb, authenticateToken, requireAdmin);
 
 // Setup Telegram webhook (if token is set)
+console.log('[TELEGRAM] Token env var:', process.env.TELEGRAM_BOT_TOKEN ? 'SET (' + process.env.TELEGRAM_BOT_TOKEN.length + ' chars)' : 'NOT SET');
 if (process.env.TELEGRAM_BOT_TOKEN) {
   try {
     const { setupWebhook } = require('./telegramBot');
