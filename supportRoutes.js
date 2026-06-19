@@ -205,6 +205,18 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
         );
       });
 
+      // Send to admin's Telegram via bot
+      try {
+        const { sendMessage: tgSendMessage } = require('../telegramBot');
+        const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
+        const webMsg = `💬 *رسالة دعم جديدة من الموقع*\n\n` +
+          `👤 المستخدم: ${req.user.username}\n` +
+          `📝 الرسالة:\n_${message.trim()}_`;
+        await tgSendMessage(adminTelegramId, webMsg).catch(() => {});
+      } catch (e) {
+        console.error('[SUPPORT] Bot send failed:', e.message);
+      }
+
       // Notify admin via Telegram if user has telegram linked
       if (userTelegramId) {
         try {

@@ -238,6 +238,7 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
 // ============ EXPORTS ============
 module.exports = {
   setupWebhook,
+  sendMessage,
   adminReply,
   closeTicket,
   activeTickets
