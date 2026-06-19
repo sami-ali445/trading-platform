@@ -302,8 +302,8 @@ async function closeTicket(ticketId) {
 
 // ============ WEBHOOK SETUP ============
 function setupWebhook(app, webhookPath = '/webhook/telegram') {
-  // Webhook endpoint
-  app.post(webhookPath, express.json(), (req, res) => {
+  // Webhook endpoint (express.json() is already global middleware)
+  app.post(webhookPath, (req, res) => {
     console.log('[WEBHOOK] Received:', JSON.stringify(req.body).substring(0, 200));
     bot.processUpdate(req.body);
     res.sendStatus(200);
