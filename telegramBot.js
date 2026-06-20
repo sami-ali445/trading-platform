@@ -310,5 +310,6 @@ module.exports = {
   sendMessage,
   adminReply,
   closeTicket,
+  notifyAdmin,
   activeTickets
 };

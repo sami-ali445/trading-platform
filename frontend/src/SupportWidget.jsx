@@ -16,6 +16,7 @@ function SupportWidget({ user, API }) {
   const [loading, setLoading] = useState(false);
   const [ticketStatus, setTicketStatus] = useState(null);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState(null);
   const messagesEndRef = useRef(null);
   const ticketIdRef = useRef(null);
 
@@ -40,6 +41,7 @@ function SupportWidget({ user, API }) {
   const sendUserMessage = async () => {
     if (!newMessage.trim() || loading) return;
     setLoading(true);
+    setError(null);
     try {
       const { data } = await API.post('/user/support/message', {
         message: newMessage.trim(),
@@ -51,8 +53,14 @@ function SupportWidget({ user, API }) {
           ticketIdRef.current = data.ticketId;
         }
         loadTicket();
+      } else {
+        setError(data.message || 'فشل إرسال الرسالة، حاول مرة أخرى');
+        setNewMessage('');
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      setError(e.response?.data?.message || 'خطأ في الاتصال، تأكد من تسجيل الدخول');
+      setNewMessage('');
+    }
     setLoading(false);
   };
 
@@ -134,6 +142,14 @@ function SupportWidget({ user, API }) {
                   }}>
                     {ticketStatus === 'open' ? '🟢 التذكرة مفتوحة' : '⚫ التذكرة مغلقة'}
                   </span>
+                )}
+                {error && (
+                  <div style={{
+                    background: '#3a1a1a', color: '#f87171', padding: '8px 12px',
+                    borderRadius: 6, marginBottom: 10, fontSize: 12, border: '1px solid #5a2a2a'
+                  }}>
+                    ⚠️ {error}
+                  </div>
                 )}
                 {messages.length === 0 ? (
                   <div style={{ textAlign: 'center', color: '#666', padding: 30 }}>

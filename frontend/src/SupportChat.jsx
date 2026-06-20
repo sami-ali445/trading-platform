@@ -36,6 +36,7 @@ function SupportChat({ user, API }) {
   const sendMessage = async () => {
     if (!newMessage.trim() || loading) return;
     setLoading(true);
+    setError(null);
     try {
       const { data } = await API.post('/user/support/message', {
         message: newMessage.trim(),
@@ -47,9 +48,13 @@ function SupportChat({ user, API }) {
           ticketIdRef.current = data.ticketId;
         }
         loadTicket();
+      } else {
+        setError(data.message || 'فشل إرسال الرسالة، حاول مرة أخرى');
+        setNewMessage('');
       }
     } catch (e) {
-      console.error(e);
+      setError(e.response?.data?.message || 'خطأ في الاتصال، تأكد من تسجيل الدخول');
+      setNewMessage('');
     }
     setLoading(false);
   };
@@ -77,6 +82,15 @@ function SupportChat({ user, API }) {
       <div style={{ fontSize: 13, color: '#888', marginBottom: 15, background: '#1a1a2e', padding: 10, borderRadius: 8 }}>
         💬 اكتب سؤالك هنا وسيرد عليك فريق الدعم قريباً
       </div>
+
+      {error && (
+        <div style={{
+          background: '#3a1a1a', color: '#f87171', padding: '8px 12px',
+          borderRadius: 6, marginBottom: 10, fontSize: 13, border: '1px solid #5a2a2a'
+        }}>
+          ⚠️ {error}
+        </div>
+      )}
 
       {/* Messages Area */}
       <div style={{
