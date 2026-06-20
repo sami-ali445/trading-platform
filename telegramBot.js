@@ -29,7 +29,7 @@ async function tgSend(method, body) {
 }
 
 async function sendMessage(chatId, text, opts = {}) {
-  return tgSend('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown', ...opts });
+  return tgSend('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', ...opts });
 }
 
 async function setWebhook(url) {
@@ -51,7 +51,7 @@ function isAdmin(chatId) {
 const FAQ = {
   'ايداع': {
     keywords: ['ايداع', 'deposit', 'اودع', 'شحن', 'شحنة', 'wallet', 'محفظة', 'usdt', 'يو اس دي', 'trc20', 'txid', 'hash'],
-    reply: `📥 *طريقة الايداع:*
+    reply: `📥 <b>طريقة الايداع:</b>
 
 1️⃣ ادخل على حسابك في المنصة
 2️⃣ اضغط على \"ايداع\"
@@ -65,7 +65,7 @@ const FAQ = {
   },
   'سحب': {
     keywords: ['سحب', 'withdraw', 'اسحب', 'تحويل', 'فلوس', 'ارباح', 'رصيدي', 'balance'],
-    reply: `💸 *طريقة السحب:*
+    reply: `💸 <b>طريقة السحب:</b>
 
 1️⃣ لازم يكون عندك 3 احالات نشطة في نفس الفئة
 2️⃣ ادخل على حسابك واضغط \"سحب\"
@@ -79,7 +79,7 @@ const FAQ = {
   },
   'احالات': {
     keywords: ['احالات', 'referral', 'دعوة', 'ادعوا', 'رابط', 'كود', 'code', 'downline', 'فريق'],
-    reply: `👥 *نظام الاحالات:*
+    reply: `👥 <b>نظام الاحالات:</b>
 
 • كل مستخدم يحصل على كود احالة خاص
 • ارباح الاحالات: المستوى الاول 10%، الثاني 5%
@@ -90,7 +90,7 @@ const FAQ = {
   },
   'فئات': {
     keywords: ['فئات', 'tier', 'مستويات', 'bronze', 'silver', 'gold', 'platinum', 'diamond', 'vip', 'elite', 'royal', 'legend', 'فئة'],
-    reply: `🏆 *فئات المنصة:*
+    reply: `🏆 <b>فئات المنصة:</b>
 
 🥉 Bronze: $10-$49
 🥈 Silver: $50-$99
@@ -106,7 +106,7 @@ const FAQ = {
   },
   'تسجيل': {
     keywords: ['تسجيل', 'register', 'حساب', 'انشاء', 'اشتراك', 'دخول', 'login', 'كلمة سر', 'password'],
-    reply: `📝 *التسجيل في المنصة:*
+    reply: `📝 <b>التسجيل في المنصة:</b>
 
 1️⃣ ادخل على الموقع
 2️⃣ اضغط \"تسجيل\"
@@ -118,7 +118,7 @@ const FAQ = {
   },
   'مشكلة': {
     keywords: ['مشكلة', 'error', 'bug', 'غلط', 'ما يشتغل', 'لا يعمل', 'فشل', 'failed', 'مشكلة تقنية'],
-    reply: `🔧 *الدعم الفني:*
+    reply: `🔧 <b>الدعم الفني:</b>
 
 صفحة المنصة ما تشتغل؟ جرب:
 1️⃣ امسح الكاش (Ctrl+Shift+Delete)
@@ -147,7 +147,7 @@ const activeTickets = new Map();
 
 async function notifyAdmin(ticketId, userInfo, message, category) {
   if (!ADMIN_TELEGRAM_ID) return;
-  const adminMsg = `🎫 *تذكرة دعم جديدة*
+  const adminMsg = `🎫 <b>تذكرة دعم جديدة</b>
 
 ` +
     `📋 التذكرة: #${ticketId}
@@ -157,10 +157,7 @@ async function notifyAdmin(ticketId, userInfo, message, category) {
     `📂 التصنيف: ${category}
 ` +
     `💬 الرسالة:
-_${message}_
-
-` +
-    `✍️ للرد: اضغط على التذكرة في لوحة الادمن`;
+_${message}_`;
   try {
     await sendMessage(ADMIN_TELEGRAM_ID, adminMsg);
   } catch (e) {
@@ -188,7 +185,7 @@ async function handleAdminMessage(msg) {
 
     if (latestTicket) {
       try {
-        await sendMessage(latestTicket.chatId, `💬 *رد من فريق الدعم:*
+        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>
 
 ${text}`);
         console.log(`[BOT] Admin reply forwarded to user ${latestTicket.chatId}`);
@@ -225,7 +222,7 @@ async function handleUserMessage(msg) {
   if (text.startsWith('/') && text !== '/start') return;
 
   if (text === '/start') {
-    const welcome = `👋 *مرحباً بك في الدعم الفني!*
+    const welcome = `👋 <b>مرحباً بك في الدعم الفني!</b>
 
 ` +
       `انا المساعد الذكي للمنصة 🎧
@@ -255,7 +252,7 @@ async function handleUserMessage(msg) {
   if (existingTicket && existingTicket.status === 'open') {
     const ticketId = existingTicket.ticketId;
     if (ADMIN_TELEGRAM_ID) {
-      const forwardMsg = `💬 *رسالة جديدة في التذكرة #${ticketId}*
+      const forwardMsg = `💬 <b>رسالة جديدة في التذكرة #${ticketId}</b>
 
 ` +
         `👤 @${username || 'مجهول'}
@@ -311,7 +308,7 @@ async function createTicket(chatId, userId, username, message, category) {
   activeTickets.set(chatId, { ticketId, status: 'open', category, createdAt: Date.now() });
   await notifyAdmin(ticketId, { id: userId, username }, message, category);
 
-  const replyText = `🎫 *تم فتح تذكرة دعم*
+  const replyText = `🎫 <b>تم فتح تذكرة دعم</b>
 
 ` +
     `📋 رقم التذكرة: #${ticketId}
@@ -329,7 +326,7 @@ async function adminReply(ticketId, message) {
   for (const [chatId, ticket] of activeTickets.entries()) {
     if (ticket.ticketId === ticketId && ticket.status === 'open') {
       try {
-        await sendMessage(chatId, `💬 *رد من فريق الدعم:*
+        await sendMessage(chatId, `💬 <b>رد من فريق الدعم:</b>
 
 ${message}`);
         return { success: true };
@@ -341,7 +338,7 @@ ${message}`);
     const resp = await fetch(`${apiUrl}/api/admin/support/tickets/${ticketId}`);
     const data = await resp.json();
     if (data.success && data.ticket && data.ticket.telegram_chat_id) {
-      await sendMessage(data.ticket.telegram_chat_id, `💬 *رد من فريق الدعم:*
+      await sendMessage(data.ticket.telegram_chat_id, `💬 <b>رد من فريق الدعم:</b>
 
 ${message}`);
       activeTickets.set(data.ticket.telegram_chat_id, { ticketId, status: data.ticket.status, category: data.ticket.category, createdAt: Date.now() });
@@ -355,7 +352,7 @@ async function closeTicket(ticketId) {
   for (const [chatId, ticket] of activeTickets.entries()) {
     if (ticket.ticketId === ticketId) {
       ticket.status = 'closed';
-      try { await sendMessage(chatId, `✅ *تم إغلاق التذكرة #${ticketId}*
+      try { await sendMessage(chatId, `✅ <b>تم إغلاق التذكرة #${ticketId}</b>
 
 شكراً لتواصلك معنا! لو عندك سؤال جديد، تواصل مانا 🎧`); } catch (e) {}
       try {

@@ -108,7 +108,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
     try {
       const ticket = await withDb(async (c) => {
         const { rows } = await c.query(
-          `SELECT * FROM support_tickets 
+          `SELECT <b> FROM support_tickets 
            WHERE username = $1 AND status = 'open' 
            ORDER BY created_at DESC LIMIT 1`,
           [req.user.username]
@@ -122,7 +122,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 
       const messages = await withDb(async (c) => {
         const { rows } = await c.query(
-          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          'SELECT </b> FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
           [ticket.ticket_id]
         );
         return rows;
@@ -277,7 +277,7 @@ _${message.trim()}_`;
     try {
       const { status, limit = 50, offset = 0 } = req.query;
       
-      let query = 'SELECT * FROM support_tickets';
+      let query = 'SELECT <b> FROM support_tickets';
       const params = [];
       
       if (status && status !== 'all') {
@@ -297,8 +297,8 @@ _${message.trim()}_`;
       const countResult = await withDb(async (c) => {
         const { rows } = await c.query(
           status && status !== 'all' 
-            ? 'SELECT COUNT(*) as total FROM support_tickets WHERE status = $1'
-            : 'SELECT COUNT(*) as total FROM support_tickets',
+            ? 'SELECT COUNT(</b>) as total FROM support_tickets WHERE status = $1'
+            : 'SELECT COUNT(<b>) as total FROM support_tickets',
           status && status !== 'all' ? [status] : []
         );
         return rows[0];
@@ -321,7 +321,7 @@ _${message.trim()}_`;
       const { ticketId } = req.params;
       
       const ticket = await withDb(async (c) => {
-        const { rows } = await c.query('SELECT * FROM support_tickets WHERE ticket_id = $1', [ticketId]);
+        const { rows } = await c.query('SELECT </b> FROM support_tickets WHERE ticket_id = $1', [ticketId]);
         return rows[0];
       });
       
@@ -331,7 +331,7 @@ _${message.trim()}_`;
       
       const messages = await withDb(async (c) => {
         const { rows } = await c.query(
-          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          'SELECT <b> FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
           [ticketId]
         );
         return rows;
@@ -356,7 +356,7 @@ _${message.trim()}_`;
       
       // Check ticket exists and is open
       const ticket = await withDb(async (c) => {
-        const { rows } = await c.query('SELECT * FROM support_tickets WHERE ticket_id = $1', [ticketId]);
+        const { rows } = await c.query('SELECT </b> FROM support_tickets WHERE ticket_id = $1', [ticketId]);
         return rows[0];
       });
       
