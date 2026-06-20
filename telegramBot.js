@@ -147,6 +147,9 @@ function getApiUrl() {
   return (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
 }
 
+// ============ MESSAGE HANDLERS ============
+const activeTickets = new Map();
+
 // Register a ticket for Telegram reply routing (called from supportRoutes.js)
 function registerTicket(ticketId, telegramChatId) {
   if (ticketId && telegramChatId) {
