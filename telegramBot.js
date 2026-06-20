@@ -142,8 +142,10 @@ function findFAQMatch(text) {
   return null;
 }
 
-// ============ MESSAGE HANDLERS ============
-const activeTickets = new Map();
+// Helper: get the correct API base URL for server-to-server calls
+function getApiUrl() {
+  return (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
+}
 
 // Register a ticket for Telegram reply routing (called from supportRoutes.js)
 function registerTicket(ticketId, telegramChatId) {
@@ -177,26 +179,36 @@ async function handleAdminMessage(msg) {
   const text = msg.text || '';
   const chatId = msg.chat.id;
 
-  console.log('[BOT] Admin message received:', text.substring(0, 100));
+  console.log('[BOT] ===== ADMIN MESSAGE REACHED =====');
+  console.log('[BOT] Admin chatId:', chatId, 'text:', text.substring(0, 100));
 
   // 1) Try to find in memory (telegram-originated tickets)
   let latestTicket = null;
+  console.log('[BOT] activeTickets size:', activeTickets.size);
   if (activeTickets.size > 0) {
     let latestTime = 0;
     for (const [ticketChatId, ticket] of activeTickets.entries()) {
+      console.log('[BOT] Memory ticket:', ticketChatId, ticket.ticketId, ticket.status);
       if (ticket.status === 'open' && ticket.createdAt > latestTime) {
         latestTime = ticket.createdAt;
         latestTicket = { chatId: ticketChatId, ...ticket };
       }
     }
+    if (latestTicket) {
+      console.log('[BOT] Found in memory:', latestTicket.ticketId, 'chat:', latestTicket.chatId);
+    }
   }
 
-  // 2) If not found in memory, search DB for most recent open ticket
+  // 2) If not found in memory, search DB via public endpoint
   if (!latestTicket) {
+    console.log('[BOT] Not found in memory, searching DB...');
     try {
-      const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-      const resp = await fetch(`${apiUrl}/api/telegram/open-tickets`);
+      // Use same-origin URL (server calling itself) — works on Render
+      const apiUrl = (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
+      console.log('[BOT] Searching DB at:', apiUrl + '/api/telegram/open-tickets');
+      const resp = await fetch(apiUrl + '/api/telegram/open-tickets');
       const data = await resp.json();
+      console.log('[BOT] DB search result:', JSON.stringify(data).substring(0, 300));
       if (data.success && data.tickets && data.tickets.length > 0) {
         // Prefer a ticket that has telegram_chat_id
         const withTg = data.tickets.find(t => t.telegram_chat_id);
@@ -206,40 +218,61 @@ async function handleAdminMessage(msg) {
         // Cache it in memory for future replies
         if (t.telegram_chat_id) {
           activeTickets.set(t.telegram_chat_id, { ticketId: t.ticket_id, status: 'open', category: t.category, createdAt: Date.now() });
+          console.log('[BOT] Cached ticket for future replies');
         }
+      } else {
+        console.log('[BOT] No open tickets in DB');
       }
     } catch (e) {
-      console.error('[BOT] DB ticket search failed:', e.message);
+      console.error('[BOT] DB ticket search FAILED:', e.message, e.stack);
     }
   }
 
+  // 3) Process the admin reply
   if (latestTicket) {
-    // If the ticket has a telegram chat ID, send reply there
-    if (latestTicket.chatId) {
-      try {
-        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>\n\n${text}`);
-        console.log(`[BOT] Admin reply forwarded to user ${latestTicket.chatId}`);
-      } catch (e) {
-        console.error('[BOT] Forward to user failed:', e.message);
-      }
-    }
+    console.log('[BOT] Processing reply for ticket:', latestTicket.ticketId);
 
-    // Save to DB via API
+    // Save admin reply to DB via PUBLIC endpoint (no auth needed)
     try {
-      const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-      await fetch(`${apiUrl}/api/support/messages`, {
+      const apiUrl = (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
+      const saveUrl = apiUrl + '/api/support/messages';
+      console.log('[BOT] Saving reply to DB:', saveUrl);
+      console.log('[BOT] Payload:', JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text }));
+      
+      const saveResp = await fetch(saveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text })
       });
+      const saveData = await saveResp.json();
+      console.log('[BOT] Save to DB result:', JSON.stringify(saveData));
+      
+      if (!saveData.success) {
+        console.error('[BOT] Save to DB FAILED:', saveData.message || 'unknown error');
+      }
     } catch (e) {
-      console.error('[BOT] Save admin reply to DB failed:', e.message);
+      console.error('[BOT] Save to DB EXCEPTION:', e.message, e.stack);
+    }
+
+    // Forward reply to user via Telegram (if user has telegram)
+    if (latestTicket.chatId) {
+      try {
+        console.log('[BOT] Forwarding reply to user telegram:', latestTicket.chatId);
+        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>\n\n${text}`);
+        console.log('[BOT] Reply forwarded to user OK');
+      } catch (e) {
+        console.error('[BOT] Forward to user telegram FAILED:', e.message);
+      }
+    } else {
+      console.log('[BOT] No telegram chatId for this ticket, skipping telegram forward');
     }
 
     return;
   }
 
-  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.`);
+  // 4) No ticket found at all
+  console.log('[BOT] No ticket found anywhere, sending "no tickets" message to admin');
+  await sendMessage(chatId, '✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.');
 }
 
 // Handle user (non-admin) message
@@ -291,7 +324,7 @@ async function handleUserMessage(msg) {
       try { await sendMessage(ADMIN_TELEGRAM_ID, forwardMsg); } catch (e) {}
     }
     try {
-      const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+      const apiUrl = getApiUrl();
       await fetch(`${apiUrl}/api/support/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -327,7 +360,7 @@ async function handleMessage(msg) {
 async function createTicket(chatId, userId, username, message, category) {
   const ticketId = require('crypto').randomUUID().substring(0, 8).toUpperCase();
   try {
-    const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const apiUrl = getApiUrl();
     await fetch(`${apiUrl}/api/support/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -364,7 +397,7 @@ ${message}`);
     }
   }
   try {
-    const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const apiUrl = getApiUrl();
     const resp = await fetch(`${apiUrl}/api/admin/support/tickets/${ticketId}`);
     const data = await resp.json();
     if (data.success && data.ticket && data.ticket.telegram_chat_id) {
@@ -386,7 +419,7 @@ async function closeTicket(ticketId) {
 
 شكراً لتواصلك معنا! لو عندك سؤال جديد، تواصل مانا 🎧`); } catch (e) {}
       try {
-        const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+        const apiUrl = getApiUrl();
         await fetch(`${apiUrl}/api/support/tickets/${ticketId}/close`, { method: 'POST' });
       } catch (e) {}
       activeTickets.delete(chatId);
