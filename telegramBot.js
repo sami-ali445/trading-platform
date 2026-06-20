@@ -145,6 +145,14 @@ function findFAQMatch(text) {
 // ============ MESSAGE HANDLERS ============
 const activeTickets = new Map();
 
+// Register a ticket for Telegram reply routing (called from supportRoutes.js)
+function registerTicket(ticketId, telegramChatId) {
+  if (ticketId && telegramChatId) {
+    activeTickets.set(telegramChatId, { ticketId, status: 'open', category: 'general', createdAt: Date.now() });
+    console.log('[TELEGRAM] Registered ticket:', ticketId, 'for chat:', telegramChatId);
+  }
+}
+
 async function notifyAdmin(ticketId, userInfo, message, category) {
   if (!ADMIN_TELEGRAM_ID) {
     console.error('[TELEGRAM] notifyAdmin: ADMIN_TELEGRAM_ID is not set!');
@@ -171,9 +179,9 @@ async function handleAdminMessage(msg) {
 
   console.log('[BOT] Admin message received:', text.substring(0, 100));
 
-  // Find the most recent active ticket to reply to
+  // 1) Try to find in memory (telegram-originated tickets)
+  let latestTicket = null;
   if (activeTickets.size > 0) {
-    let latestTicket = null;
     let latestTime = 0;
     for (const [ticketChatId, ticket] of activeTickets.entries()) {
       if (ticket.status === 'open' && ticket.createdAt > latestTime) {
@@ -181,34 +189,57 @@ async function handleAdminMessage(msg) {
         latestTicket = { chatId: ticketChatId, ...ticket };
       }
     }
+  }
 
-    if (latestTicket) {
+  // 2) If not found in memory, search DB for most recent open ticket
+  if (!latestTicket) {
+    try {
+      const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+      const resp = await fetch(`${apiUrl}/api/telegram/open-tickets`);
+      const data = await resp.json();
+      if (data.success && data.tickets && data.tickets.length > 0) {
+        // Prefer a ticket that has telegram_chat_id
+        const withTg = data.tickets.find(t => t.telegram_chat_id);
+        const t = withTg || data.tickets[0];
+        latestTicket = { ticketId: t.ticket_id, chatId: t.telegram_chat_id };
+        console.log('[BOT] Found open ticket from DB:', t.ticket_id, 'chat:', t.telegram_chat_id);
+        // Cache it in memory for future replies
+        if (t.telegram_chat_id) {
+          activeTickets.set(t.telegram_chat_id, { ticketId: t.ticket_id, status: 'open', category: t.category, createdAt: Date.now() });
+        }
+      }
+    } catch (e) {
+      console.error('[BOT] DB ticket search failed:', e.message);
+    }
+  }
+
+  if (latestTicket) {
+    // If the ticket has a telegram chat ID, send reply there
+    if (latestTicket.chatId) {
       try {
-        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>
-
-${text}`);
+        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>\n\n${text}`);
         console.log(`[BOT] Admin reply forwarded to user ${latestTicket.chatId}`);
       } catch (e) {
         console.error('[BOT] Forward to user failed:', e.message);
       }
-
-      // Save to DB via API
-      try {
-        const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-        await fetch(`${apiUrl}/api/support/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text })
-        });
-      } catch (e) {}
-
-      return;
     }
+
+    // Save to DB via API
+    try {
+      const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+      await fetch(`${apiUrl}/api/support/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text })
+      });
+    } catch (e) {
+      console.error('[BOT] Save admin reply to DB failed:', e.message);
+    }
+
+    return;
   }
 
-  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.
-
-ارسل رقم التذكرة للرد على عميل محدد.`);
+  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.`);
 }
 
 // Handle user (non-admin) message
@@ -395,5 +426,6 @@ module.exports = {
   adminReply,
   closeTicket,
   notifyAdmin,
+  registerTicket,
   activeTickets
 };

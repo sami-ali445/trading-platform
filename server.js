@@ -1144,6 +1144,23 @@ app.get('/api/admin/users/:username/tiers', authenticateToken, requireAdmin, asy
 const { setupSupportRoutes } = require('./supportRoutes');
 setupSupportRoutes(app, withDb, authenticateToken, requireAdmin);
 
+// Public endpoint for bot to look up tickets (no auth needed, read-only)
+app.get('/api/telegram/open-tickets', async (req, res) => {
+  try {
+    const tickets = await withDb(async (c) => {
+      const { rows } = await c.query(
+        `SELECT ticket_id, telegram_chat_id, telegram_username, username, user_message, category, status, source
+         FROM support_tickets WHERE status = 'open' ORDER BY updated_at DESC LIMIT 10`
+      );
+      return rows;
+    });
+    res.json({ success: true, tickets: tickets || [] });
+  } catch (err) {
+    console.error('[TELEGRAM] Open tickets lookup failed:', err.message);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Setup Telegram webhook (always enable)
 try {
   const { setupWebhook } = require('./telegramBot');

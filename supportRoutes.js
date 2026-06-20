@@ -205,6 +205,18 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
         );
       });
 
+      // Register ticket in bot's activeTickets for Telegram reply routing
+      if (userTelegramId) {
+        try {
+          const tgBot = require('./telegramBot');
+          if (tgBot.registerTicket) {
+            tgBot.registerTicket(activeTicketId, userTelegramId);
+          }
+        } catch (e) {
+          console.error('[SUPPORT] registerTicket failed:', e.message);
+        }
+      }
+
       // Send to admin's Telegram via bot
       let telegramSent = false;
       try {
