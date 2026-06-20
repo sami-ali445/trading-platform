@@ -179,120 +179,108 @@ async function notifyAdmin(ticketId, userInfo, message, category) {
 
 // Handle admin message -> forward to user's ticket as admin reply
 async function handleAdminMessage(msg) {
+  // CRITICAL: Use msg.text — this is the NEW text the admin just typed
   const text = msg.text || '';
   const chatId = msg.chat.id;
 
   console.log('[BOT] ===== ADMIN MESSAGE REACHED =====');
-  console.log('[BOT] Admin chatId:', chatId, 'text:', text.substring(0, 100));
+  console.log('[BOT] chatId:', String(chatId));
+  console.log('[BOT] msg.text (NEW admin reply):', text.substring(0, 200));
 
-  // 0) Try to extract ticketId from reply_to_message
+  // 0) Extract ticketId from reply_to_message
   let replyTicketId = null;
-  if (msg.reply_to_message && msg.reply_to_message.text) {
-    const replyText = msg.reply_to_message.text;
-    // Match patterns like: 📋 التذكرة: #WEB-XXXX or #WEB-XXXX or ticket_id in text
-    const ticketMatch = replyText.match(/#([A-Z0-9-]{4,})/);
+  if (msg.reply_to_message) {
+    const replyText = msg.reply_to_message.text || '';
+    console.log('[BOT] reply_to_message.text:', replyText.substring(0, 200));
+    // Match: #WEB-XXXX, #TEST-XXXX, #XXXX, etc.
+    const ticketMatch = replyText.match(/#([A-Z][A-Z0-9-]{3,})/);
     if (ticketMatch) {
       replyTicketId = ticketMatch[1];
       console.log('[BOT] Extracted ticketId from reply:', replyTicketId);
     } else {
-      console.log('[BOT] Could not extract ticketId from reply text:', replyText.substring(0, 100));
+      console.log('[BOT] Could NOT extract ticketId from reply');
     }
+  } else {
+    console.log('[BOT] No reply_to_message — not a reply');
   }
 
-  // 1) Try to find in memory (telegram-originated tickets)
-  let latestTicket = null;
-  console.log('[BOT] activeTickets size:', activeTickets.size);
-  if (activeTickets.size > 0) {
+  // 1) Find ticket: reply ticketId > memory > DB
+  let targetTicketId = null;
+
+  // Priority 1: ticketId from reply
+  if (replyTicketId) {
+    targetTicketId = replyTicketId;
+    console.log('[BOT] Using ticketId from reply:', targetTicketId);
+  }
+
+  // Priority 2: latest open ticket from memory
+  if (!targetTicketId && activeTickets.size > 0) {
     let latestTime = 0;
-    for (const [ticketChatId, ticket] of activeTickets.entries()) {
-      console.log('[BOT] Memory ticket:', ticketChatId, ticket.ticketId, ticket.status);
+    let latest = null;
+    for (const [cid, ticket] of activeTickets.entries()) {
       if (ticket.status === 'open' && ticket.createdAt > latestTime) {
         latestTime = ticket.createdAt;
-        latestTicket = { chatId: ticketChatId, ...ticket };
+        latest = { chatId: cid, ...ticket };
       }
     }
-    if (latestTicket) {
-      console.log('[BOT] Found in memory:', latestTicket.ticketId, 'chat:', latestTicket.chatId);
+    if (latest) {
+      targetTicketId = latest.ticketId;
+      console.log('[BOT] Using ticketId from memory:', targetTicketId);
     }
   }
 
-  // 2) If we got a ticketId from reply, use it directly
-  if (replyTicketId && !latestTicket) {
-    console.log('[BOT] Using ticketId from reply:', replyTicketId);
-    latestTicket = { ticketId: replyTicketId, chatId: null };
-  }
-
-  // 3) If not found in memory, search DB via public endpoint
-  if (!latestTicket) {
-    console.log('[BOT] Not found in memory, searching DB...');
+  // Priority 3: latest open ticket from DB
+  if (!targetTicketId) {
     try {
       const apiUrl = getApiUrl();
-      console.log('[BOT] Searching DB at:', apiUrl + '/api/telegram/open-tickets');
       const resp = await fetch(apiUrl + '/api/telegram/open-tickets');
       const data = await resp.json();
-      console.log('[BOT] DB search result:', JSON.stringify(data).substring(0, 300));
       if (data.success && data.tickets && data.tickets.length > 0) {
-        const withTg = data.tickets.find(t => t.telegram_chat_id);
-        const t = withTg || data.tickets[0];
-        latestTicket = { ticketId: t.ticket_id, chatId: t.telegram_chat_id };
-        console.log('[BOT] Found open ticket from DB:', t.ticket_id, 'chat:', t.telegram_chat_id);
-        if (t.telegram_chat_id) {
-          activeTickets.set(t.telegram_chat_id, { ticketId: t.ticket_id, status: 'open', category: t.category, createdAt: Date.now() });
-          console.log('[BOT] Cached ticket for future replies');
-        }
-      } else {
-        console.log('[BOT] No open tickets in DB');
+        const t = data.tickets[0];
+        targetTicketId = t.ticket_id;
+        console.log('[BOT] Using ticketId from DB:', targetTicketId);
       }
     } catch (e) {
-      console.error('[BOT] DB ticket search FAILED:', e.message, e.stack);
+      console.error('[BOT] DB search failed:', e.message);
     }
   }
 
-  // 4) Process the admin reply
-  if (latestTicket) {
-    console.log('[BOT] Processing reply for ticket:', latestTicket.ticketId);
+  // 2) If we have a ticket, save the admin's NEW text to DB
+  if (targetTicketId) {
+    console.log('[BOT] Saving admin reply to ticket:', targetTicketId);
+    console.log('[BOT] Reply text (msg.text):', text);
 
-    // Save admin reply to DB
     try {
       const apiUrl = getApiUrl();
-      const saveUrl = apiUrl + '/api/support/messages';
-      console.log('[BOT] Saving reply to DB:', saveUrl);
-      console.log('[BOT] Payload:', JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text }));
+      const payload = { ticketId: targetTicketId, sender: 'admin', message: text };
+      console.log('[BOT] POST payload:', JSON.stringify(payload));
 
-      const saveResp = await fetch(saveUrl, {
+      const saveResp = await fetch(apiUrl + '/api/support/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text })
+        body: JSON.stringify(payload)
       });
       const saveData = await saveResp.json();
-      console.log('[BOT] Save to DB result:', JSON.stringify(saveData));
+      console.log('[BOT] Save result:', JSON.stringify(saveData));
 
-      if (!saveData.success) {
-        console.error('[BOT] Save to DB FAILED:', saveData.message || 'unknown error');
+      if (saveData.success) {
+        console.log('[BOT] Admin reply SAVED to DB successfully!');
+        // Confirm to admin
+        await sendMessage(chatId, '✅ تم إرسال ردك بنجاح إلى العميل');
+      } else {
+        console.error('[BOT] Save FAILED:', saveData.message);
+        await sendMessage(chatId, '❌ فشل إرسال الرد: ' + (saveData.message || 'خطأ غير معروف'));
       }
     } catch (e) {
-      console.error('[BOT] Save to DB EXCEPTION:', e.message, e.stack);
+      console.error('[BOT] Save EXCEPTION:', e.message, e.stack);
+      await sendMessage(chatId, '❌ خطأ في الإرسال');
     }
-
-    // Forward reply to user via Telegram (if user has telegram)
-    if (latestTicket.chatId) {
-      try {
-        console.log('[BOT] Forwarding reply to user telegram:', latestTicket.chatId);
-        await sendMessage(latestTicket.chatId, '💬 <b>رد من فريق الدعم:</b>\n\n' + text);
-        console.log('[BOT] Reply forwarded to user OK');
-      } catch (e) {
-        console.error('[BOT] Forward to user telegram FAILED:', e.message);
-      }
-    } else {
-      console.log('[BOT] No telegram chatId for this ticket, skipping telegram forward');
-    }
-
     return;
   }
 
-  // 5) No ticket found at all
-  console.log('[BOT] No ticket found anywhere, sending "no tickets" message to admin');
-  await sendMessage(chatId, '✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.');
+  // 3) No ticket found
+  console.log('[BOT] No ticket found');
+  await sendMessage(chatId, '✅ لا توجد تذاكر مفتوحة.\nأرسل رقم التذكرة للرد على عميل.');
 }
 
 // Handle user (non-admin) message
@@ -369,20 +357,25 @@ async function handleUserMessage(msg) {
 // Main message handler - routes to admin or user handler
 async function handleMessage(msg) {
   const chatId = msg.chat.id;
+  const text = msg.text || '';
 
-  // Debug: always log incoming message details
+  // Debug: always log incoming message
   console.log('[BOT] ===== INCOMING MESSAGE =====');
-  console.log('[BOT] chatId:', chatId, '| type:', msg.chat?.type);
-  console.log('[BOT] isAdmin:', isAdmin(chatId), '| ADMIN_TELEGRAM_ID:', ADMIN_TELEGRAM_ID);
-  console.log('[BOT] text:', (msg.text || '').substring(0, 100));
+  console.log('[BOT] chatId:', String(chatId), '| type:', msg.chat?.type);
+  console.log('[BOT] ADMIN_TELEGRAM_ID:', String(ADMIN_TELEGRAM_ID));
+  console.log('[BOT] isAdmin:', isAdmin(chatId));
+  console.log('[BOT] msg.text:', text.substring(0, 100));
   console.log('[BOT] reply_to_message:', msg.reply_to_message ? 'YES' : 'NO');
   if (msg.reply_to_message) {
-    console.log('[BOT] reply_to_message text:', (msg.reply_to_message.text || '').substring(0, 100));
+    console.log('[BOT] reply_to_message.text:', (msg.reply_to_message.text || '').substring(0, 100));
   }
 
+  // CRITICAL: Admin check — if chatId matches admin, ALWAYS treat as admin
   if (isAdmin(chatId)) {
+    console.log('[BOT] -> Routing to handleAdminMessage');
     await handleAdminMessage(msg);
   } else {
+    console.log('[BOT] -> Routing to handleUserMessage');
     await handleUserMessage(msg);
   }
 }
