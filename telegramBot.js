@@ -157,7 +157,7 @@ async function notifyAdmin(ticketId, userInfo, message, category) {
     `📂 التصنيف: ${category}
 ` +
     `💬 الرسالة:
-_${message}_`;
+${message}`;
   try {
     await sendMessage(ADMIN_TELEGRAM_ID, adminMsg);
   } catch (e) {
@@ -257,7 +257,7 @@ async function handleUserMessage(msg) {
 ` +
         `👤 @${username || 'مجهول'}
 ` +
-        `📝 _${text}_`;
+        `📝 ${text}`;
       try { await sendMessage(ADMIN_TELEGRAM_ID, forwardMsg); } catch (e) {}
     }
     try {

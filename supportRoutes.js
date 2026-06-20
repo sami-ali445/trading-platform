@@ -206,16 +206,17 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       });
 
       // Send to admin's Telegram via bot
+      // Send to admin's Telegram via bot
       try {
         const { sendMessage: tgSendMessage } = require('../telegramBot');
         const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
-        const webMsg = `💬 *رسالة دعم جديدة من الموقع*
+        const webMsg = `💬 <b>رسالة دعم جديدة من الموقع</b>
 
 ` +
           `👤 المستخدم: ${req.user.username}
 ` +
           `📝 الرسالة:
-_${message.trim()}_`;
+${message.trim()}`;
         console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
         await tgSendMessage(adminTelegramId, webMsg);
         console.log('[SUPPORT] Telegram sent OK');
