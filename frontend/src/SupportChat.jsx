@@ -171,7 +171,7 @@ function SupportChat({ user, API }) {
               loadTicket();
             } catch (e) { console.error(e); }
           }}
-          style={{ ...s.btn('#39ff14'), marginTop: 10 }}>
+          style={{ padding: '8px 20px', background: '#39ff14', color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13, marginTop: 10 }}>
           🎫 فتح تذكرة جديدة
         </button>
       )}
