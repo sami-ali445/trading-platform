@@ -208,7 +208,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       // Send to admin's Telegram via bot
       let telegramSent = false;
       try {
-        const tgBot = require('../telegramBot');
+        const tgBot = require('./telegramBot');
         const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
         const webMsg = `💬 <b>رسالة دعم جديدة من الموقع</b>\n\n` +
           `👤 المستخدم: ${req.user.username}\n` +
@@ -224,7 +224,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       // Notify admin via Telegram if user has telegram linked
       if (userTelegramId) {
         try {
-          const { notifyAdmin } = require('../telegramBot');
+          const { notifyAdmin } = require('./telegramBot');
           if (notifyAdmin) {
             await notifyAdmin(activeTicketId, { id: userTelegramId, username: req.user.username }, message.trim(), 'general');
           }
@@ -380,7 +380,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       
       // Forward to Telegram user (works for both web and telegram tickets)
       try {
-        const tgBot = require('../telegramBot');
+        const tgBot = require('./telegramBot');
         if (tgBot.adminReply) {
           console.log('[SUPPORT] Forwarding admin reply to Telegram, ticket:', ticketId);
           const result = await tgBot.adminReply(ticketId, message);
@@ -414,7 +414,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       
       // Notify user on Telegram
       try {
-        const { closeTicket } = require('../telegramBot');
+        const { closeTicket } = require('./telegramBot');
         if (closeTicket) {
           await closeTicket(ticketId);
         }
