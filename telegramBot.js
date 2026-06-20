@@ -9,7 +9,7 @@
  * - Admin replies from web panel OR from Telegram -> bot forwards to user
  */
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:***';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:AAFTfDRE9qQeCgtGPEZEZCGO30Rrb5JD1zc';
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '8916948567';
 
 if (!BOT_TOKEN) {
