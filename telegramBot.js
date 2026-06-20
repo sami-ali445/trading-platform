@@ -146,22 +146,21 @@ function findFAQMatch(text) {
 const activeTickets = new Map();
 
 async function notifyAdmin(ticketId, userInfo, message, category) {
-  if (!ADMIN_TELEGRAM_ID) return;
-  const adminMsg = `🎫 <b>تذكرة دعم جديدة</b>
-
-` +
-    `📋 التذكرة: #${ticketId}
-` +
-    `👤 المستخدم: @${userInfo.username || 'مجهول'} (ID: ${userInfo.id})
-` +
-    `📂 التصنيف: ${category}
-` +
-    `💬 الرسالة:
-${message}`;
+  if (!ADMIN_TELEGRAM_ID) {
+    console.error('[TELEGRAM] notifyAdmin: ADMIN_TELEGRAM_ID is not set!');
+    return;
+  }
+  const adminMsg = `🎫 <b>تذكرة دعم جديدة</b>\n\n` +
+    `📋 التذكرة: #${ticketId}\n` +
+    `👤 المستخدم: @${userInfo.username || 'مجهول'} (ID: ${userInfo.id})\n` +
+    `📂 التصنيف: ${category}\n` +
+    `💬 الرسالة:\n${message}`;
   try {
-    await sendMessage(ADMIN_TELEGRAM_ID, adminMsg);
+    console.log('[TELEGRAM] notifyAdmin: Sending to admin', ADMIN_TELEGRAM_ID, 'ticket:', ticketId);
+    const result = await sendMessage(ADMIN_TELEGRAM_ID, adminMsg);
+    console.log('[TELEGRAM] notifyAdmin: Result:', JSON.stringify(result));
   } catch (e) {
-    console.error('[TELEGRAM] Admin notify failed:', e.message);
+    console.error('[TELEGRAM] notifyAdmin: Failed:', e.message);
   }
 }
 

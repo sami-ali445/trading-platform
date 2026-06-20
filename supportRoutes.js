@@ -108,7 +108,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
     try {
       const ticket = await withDb(async (c) => {
         const { rows } = await c.query(
-          `SELECT <b> FROM support_tickets 
+          `SELECT * FROM support_tickets 
            WHERE username = $1 AND status = 'open' 
            ORDER BY created_at DESC LIMIT 1`,
           [req.user.username]
@@ -122,7 +122,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 
       const messages = await withDb(async (c) => {
         const { rows } = await c.query(
-          'SELECT </b> FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
           [ticket.ticket_id]
         );
         return rows;
@@ -206,22 +206,17 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       });
 
       // Send to admin's Telegram via bot
-      // Send to admin's Telegram via bot
       let telegramSent = false;
       try {
-        const { sendMessage: tgSendMessage } = require('../telegramBot');
+        const tgBot = require('../telegramBot');
         const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
-        const webMsg = `💬 <b>رسالة دعم جديدة من الموقع</b>
-
-` +
-          `👤 المستخدم: ${req.user.username}
-` +
-          `📝 الرسالة:
-${message.trim()}`;
-        console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
-        await tgSendMessage(adminTelegramId, webMsg);
+        const webMsg = `💬 <b>رسالة دعم جديدة من الموقع</b>\n\n` +
+          `👤 المستخدم: ${req.user.username}\n` +
+          `📝 الرسالة:\n${message.trim()}`;
+        console.log('[SUPPORT] Sending to Telegram admin:', adminTelegramId);
+        const tgResult = await tgBot.sendMessage(adminTelegramId, webMsg);
+        console.log('[SUPPORT] Telegram result:', JSON.stringify(tgResult));
         telegramSent = true;
-        console.log('[SUPPORT] Telegram sent OK');
       } catch (e) {
         console.error('[SUPPORT] Bot send failed:', e.message);
       }
@@ -280,7 +275,7 @@ ${message.trim()}`;
     try {
       const { status, limit = 50, offset = 0 } = req.query;
       
-      let query = 'SELECT <b> FROM support_tickets';
+      let query = 'SELECT * FROM support_tickets';
       const params = [];
       
       if (status && status !== 'all') {
@@ -300,8 +295,8 @@ ${message.trim()}`;
       const countResult = await withDb(async (c) => {
         const { rows } = await c.query(
           status && status !== 'all' 
-            ? 'SELECT COUNT(</b>) as total FROM support_tickets WHERE status = $1'
-            : 'SELECT COUNT(<b>) as total FROM support_tickets',
+            ? 'SELECT COUNT(*) as total FROM support_tickets WHERE status = $1'
+            : 'SELECT COUNT(*) as total FROM support_tickets',
           status && status !== 'all' ? [status] : []
         );
         return rows[0];
@@ -324,7 +319,7 @@ ${message.trim()}`;
       const { ticketId } = req.params;
       
       const ticket = await withDb(async (c) => {
-        const { rows } = await c.query('SELECT </b> FROM support_tickets WHERE ticket_id = $1', [ticketId]);
+        const { rows } = await c.query('SELECT * FROM support_tickets WHERE ticket_id = $1', [ticketId]);
         return rows[0];
       });
       
@@ -334,7 +329,7 @@ ${message.trim()}`;
       
       const messages = await withDb(async (c) => {
         const { rows } = await c.query(
-          'SELECT <b> FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
           [ticketId]
         );
         return rows;
@@ -359,7 +354,7 @@ ${message.trim()}`;
       
       // Check ticket exists and is open
       const ticket = await withDb(async (c) => {
-        const { rows } = await c.query('SELECT </b> FROM support_tickets WHERE ticket_id = $1', [ticketId]);
+        const { rows } = await c.query('SELECT * FROM support_tickets WHERE ticket_id = $1', [ticketId]);
         return rows[0];
       });
       
@@ -385,9 +380,11 @@ ${message.trim()}`;
       
       // Forward to Telegram user (works for both web and telegram tickets)
       try {
-        const { adminReply } = require('../telegramBot');
-        if (adminReply) {
-          const result = await adminReply(ticketId, message);
+        const tgBot = require('../telegramBot');
+        if (tgBot.adminReply) {
+          console.log('[SUPPORT] Forwarding admin reply to Telegram, ticket:', ticketId);
+          const result = await tgBot.adminReply(ticketId, message);
+          console.log('[SUPPORT] Admin reply Telegram result:', JSON.stringify(result));
           if (!result?.success) {
             console.error('[SUPPORT] Telegram forward result:', result?.error || 'unknown error');
           }
