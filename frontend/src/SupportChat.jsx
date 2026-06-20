@@ -50,11 +50,9 @@ function SupportChat({ user, API }) {
         loadTicket();
       } else {
         setError(data.message || 'فشل إرسال الرسالة، حاول مرة أخرى');
-        setNewMessage('');
       }
     } catch (e) {
       setError(e.response?.data?.message || 'خطأ في الاتصال، تأكد من تسجيل الدخول');
-      setNewMessage('');
     }
     setLoading(false);
   };

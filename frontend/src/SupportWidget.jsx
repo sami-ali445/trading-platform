@@ -55,11 +55,9 @@ function SupportWidget({ user, API }) {
         loadTicket();
       } else {
         setError(data.message || 'فشل إرسال الرسالة، حاول مرة أخرى');
-        setNewMessage('');
       }
     } catch (e) {
       setError(e.response?.data?.message || 'خطأ في الاتصال، تأكد من تسجيل الدخول');
-      setNewMessage('');
     }
     setLoading(false);
   };
@@ -79,8 +77,7 @@ function SupportWidget({ user, API }) {
       setSent(true);
       setNewMessage('');
     } catch (e) {
-      setSent(true);
-      setNewMessage('');
+      setError('فشل إرسال الرسالة، حاول مرة أخرى');
     }
     setLoading(false);
   };
@@ -199,6 +196,14 @@ function SupportWidget({ user, API }) {
                       <br /><br />
                       💡 <span style={{ color: '#aaa' }}>يمكنك تسجيل الدخول للحصول على دعم فوري</span>
                     </div>
+                    {error && (
+                      <div style={{
+                        background: '#3a1a1a', color: '#f87171', padding: '8px 12px',
+                        borderRadius: 6, marginBottom: 10, fontSize: 13, border: '1px solid #5a2a2a'
+                      }}>
+                        ⚠️ {error}
+                      </div>
+                    )}
                     <input
                       value={guestName}
                       onChange={e => setGuestName(e.target.value)}
