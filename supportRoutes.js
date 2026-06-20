@@ -218,8 +218,6 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
           `📝 الرسالة:
 ${message.trim()}`;
         console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
-        console.log('[SUPPORT] DEBUG: webMsg =', JSON.stringify(webMsg));
-        console.log('[SUPPORT] DEBUG: using HTML parse mode');
         await tgSendMessage(adminTelegramId, webMsg);
         console.log('[SUPPORT] Telegram sent OK');
       } catch (e) {
