@@ -1065,6 +1065,17 @@ app.post('/api/admin/action', authenticateToken, requireAdmin, async (req, res) 
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Admin: Update USDT wallet
+app.post('/api/admin/update-wallet', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { wallet } = req.body;
+    if (!wallet || typeof wallet !== 'string') return res.status(400).json({ success: false, message: 'Wallet address required.' });
+    // Update in-memory wallet
+    process.env.USDT_WALLET = wallet;
+    res.json({ success: true, message: 'Wallet updated.' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Admin: Reset user tier cycle
 app.post('/api/admin/users/:username/reset-cycle', authenticateToken, requireAdmin, async (req, res) => {
   try {

@@ -956,7 +956,7 @@ function Admin({ onLogout }) {
 
   const refresh = async () => {
     try {
-      const [dr, wr] = await Promise.all([API.get('/admin/deposits'), API.get('/admin/withdraws')]);
+      const [dr, wr] = await Promise.all([API.get('/api/admin/deposits'), API.get('/api/admin/withdraws')]);
       const newDeposits = dr.data.deposits || [];
       const newWithdraws = wr.data.withdraws || [];
       const newPending = newDeposits.filter(d => d.status === 'pending').length + newWithdraws.filter(w => w.status === 'pending').length;
@@ -967,13 +967,13 @@ function Admin({ onLogout }) {
       setReqs({ deposits: newDeposits, withdraws: newWithdraws });
     } catch {}
   };
-  const loadUsers = async () => { try { const r = await API.get('/admin/users'); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
-  const loadTxns = async () => { try { const r = await API.get('/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
+  const loadUsers = async () => { try { const r = await API.get('/api/admin/users'); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
+  const loadTxns = async () => { try { const r = await API.get('/api/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
 
   useEffect(() => { refresh(); loadUsers(); loadTxns(); const i = setInterval(refresh, 10000); return () => clearInterval(i); }, []);
 
-  const act = async (id, type, action) => { try { await API.post('/admin/action', { id, type, action }); setMsg(`✅ ${action === 'Approve' ? 'موافقة' : 'رفض'}`); refresh(); } catch { setMsg('❌ خطأ'); } };
-  const updWallet = async () => { try { await API.post('/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
+  const act = async (id, type, action) => { try { await API.post('/api/admin/action', { id, type, action }); setMsg(`✅ ${action === 'Approve' ? 'موافقة' : 'رفض'}`); refresh(); } catch { setMsg('❌ خطأ'); } };
+  const updWallet = async () => { try { await API.post('/api/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
 
   const tabLabel = (t) => {
   if (t === 'support') return '🎫 الدعم الفني';

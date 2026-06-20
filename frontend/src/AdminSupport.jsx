@@ -24,7 +24,7 @@ function AdminSupportPanel({ user }) {
 
   const loadTickets = useCallback(async () => {
     try {
-      const { data } = await API.get(`/api/admin/support/tickets?status=${filter}`);
+      const { data } = await API.get(`/admin/support/tickets?status=${filter}`);
       if (data.success) setTickets(data.tickets);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -32,7 +32,7 @@ function AdminSupportPanel({ user }) {
 
   const loadStats = useCallback(async () => {
     try {
-      const { data } = await API.get('/api/admin/support/stats');
+      const { data } = await API.get('/admin/support/stats');
       if (data.success) setStats(data.stats);
     } catch (e) { console.error(e); }
   }, []);
@@ -41,7 +41,7 @@ function AdminSupportPanel({ user }) {
 
   const loadTicketDetail = async (ticketId) => {
     try {
-      const { data } = await API.get(`/api/admin/support/tickets/${ticketId}`);
+      const { data } = await API.get(`/admin/support/tickets/${ticketId}`);
       if (data.success) {
         setSelectedTicket(data.ticket);
         setMessages(data.messages);
@@ -52,7 +52,7 @@ function AdminSupportPanel({ user }) {
   const sendReply = async () => {
     if (!replyText.trim() || !selectedTicket) return;
     try {
-      await API.post(`/api/admin/support/tickets/${selectedTicket.ticket_id}/reply`, {
+      await API.post(`/admin/support/tickets/${selectedTicket.ticket_id}/reply`, {
         message: replyText.trim()
       });
       setReplyText('');
@@ -63,7 +63,7 @@ function AdminSupportPanel({ user }) {
 
   const closeTicket = async (ticketId) => {
     try {
-      await API.post(`/api/admin/support/tickets/${ticketId}/close`);
+      await API.post(`/admin/support/tickets/${ticketId}/close`);
       setSelectedTicket(null);
       setMessages([]);
       loadTickets();
@@ -73,7 +73,7 @@ function AdminSupportPanel({ user }) {
 
   const reopenTicket = async (ticketId) => {
     try {
-      await API.post(`/api/admin/support/tickets/${ticketId}/reopen`);
+      await API.post(`/admin/support/tickets/${ticketId}/reopen`);
       loadTicketDetail(ticketId);
       loadTickets();
       loadStats();
