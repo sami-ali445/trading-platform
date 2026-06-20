@@ -207,6 +207,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 
       // Send to admin's Telegram via bot
       // Send to admin's Telegram via bot
+      let telegramSent = false;
       try {
         const { sendMessage: tgSendMessage } = require('../telegramBot');
         const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
@@ -219,6 +220,7 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
 ${message.trim()}`;
         console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
         await tgSendMessage(adminTelegramId, webMsg);
+        telegramSent = true;
         console.log('[SUPPORT] Telegram sent OK');
       } catch (e) {
         console.error('[SUPPORT] Bot send failed:', e.message);
@@ -236,7 +238,7 @@ ${message.trim()}`;
         }
       }
 
-      res.json({ success: true, ticketId: activeTicketId });
+      res.json({ success: true, ticketId: activeTicketId, telegramSent });
     } catch (err) {
       console.error('[SUPPORT] User message:', err.message);
       res.status(500).json({ success: false, message: 'Server error' });
