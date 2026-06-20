@@ -51,27 +51,82 @@ function isAdmin(chatId) {
 const FAQ = {
   'ايداع': {
     keywords: ['ايداع', 'deposit', 'اودع', 'شحن', 'شحنة', 'wallet', 'محفظة', 'usdt', 'يو اس دي', 'trc20', 'txid', 'hash'],
-    reply: `📥 *طريقة الايداع:*\\n\\n1️⃣ ادخل على حسابك في المنصة\\n2️⃣ اضغط على \"ايداع\"\\n3️⃣ اختر المبلغ (الحد ادنى $10)\\n4️⃣ حول USDT على الشبكة TRC20 للمحفظة المعروضة\\n5️⃣ انسخ الـ TxID من محفظتك والصقه في النموذج\\n6️⃣ اضغط \"تأكيد الايداع\"\\n\\n⏰ يتم المراجعة خلال 1-24 ساعة\\n💰 ارباح اسبوعية 20%`
+    reply: `📥 *طريقة الايداع:*
+
+1️⃣ ادخل على حسابك في المنصة
+2️⃣ اضغط على \"ايداع\"
+3️⃣ اختر المبلغ (الحد ادنى $10)
+4️⃣ حول USDT على الشبكة TRC20 للمحفظة المعروضة
+5️⃣ انسخ الـ TxID من محفظتك والصقه في النموذج
+6️⃣ اضغط \"تأكيد الايداع\"
+
+⏰ يتم المراجعة خلال 1-24 ساعة
+💰 ارباح اسبوعية 20%`
   },
   'سحب': {
     keywords: ['سحب', 'withdraw', 'اسحب', 'تحويل', 'فلوس', 'ارباح', 'رصيدي', 'balance'],
-    reply: `💸 *طريقة السحب:*\\n\\n1️⃣ لازم يكون عندك 3 احالات نشطة في نفس الفئة\\n2️⃣ ادخل على حسابك واضغط \"سحب\"\\n3️⃣ ادخل المبلغ (الحد الاسبوعي = ارباحك)\\n4️⃣ اضبط محفظتك وابعث الطلب\\n\\n⚠️ ملاحظات:\\n• الحد الاقصى للسحب = 140% من ايداعك\\n• الدورة 7 اسابيع\\n• بعد 7 اسابيع تحتاج 3 احالات جديدة`
+    reply: `💸 *طريقة السحب:*
+
+1️⃣ لازم يكون عندك 3 احالات نشطة في نفس الفئة
+2️⃣ ادخل على حسابك واضغط \"سحب\"
+3️⃣ ادخل المبلغ (الحد الاسبوعي = ارباحك)
+4️⃣ اضبط محفظتك وابعث الطلب
+
+⚠️ ملاحظات:
+• الحد الاقصى للسحب = 140% من ايداعك
+• الدورة 7 اسابيع
+• بعد 7 اسابيع تحتاج 3 احالات جديدة`
   },
   'احالات': {
     keywords: ['احالات', 'referral', 'دعوة', 'ادعوا', 'رابط', 'كود', 'code', 'downline', 'فريق'],
-    reply: `👥 *نظام الاحالات:*\\n\\n• كل مستخدم يحصل على كود احالة خاص\\n• ارباح الاحالات: المستوى الاول 10%، الثاني 5%\\n• للسحب تحتاج 3 احالات نشطة في نفس الفئة\\n• شارك رابط الدعوة مع اصدقائك\\n\\n📎 رابط الدعوة تجده في حسابك`
+    reply: `👥 *نظام الاحالات:*
+
+• كل مستخدم يحصل على كود احالة خاص
+• ارباح الاحالات: المستوى الاول 10%، الثاني 5%
+• للسحب تحتاج 3 احالات نشطة في نفس الفئة
+• شارك رابط الدعوة مع اصدقائك
+
+📎 رابط الدعوة تجده في حسابك`
   },
   'فئات': {
     keywords: ['فئات', 'tier', 'مستويات', 'bronze', 'silver', 'gold', 'platinum', 'diamond', 'vip', 'elite', 'royal', 'legend', 'فئة'],
-    reply: `🏆 *فئات المنصة:*\\n\\n🥉 Bronze: $10-$49\\n🥈 Silver: $50-$99\\n🥇 Gold: $100-$249\\n💎 Platinum: $250-$499\\n💠 Diamond: $500-$999\\n⭐ VIP: $1,000-$2,499\\n👑 Elite: $2,500-$4,999\\n🏅 Royal: $5,000-$9,999\\n🌟 Legend: $10,000+\\n\\n📈 كل فئة مستقلة بدورة خاصة (7 اسابيع)`
+    reply: `🏆 *فئات المنصة:*
+
+🥉 Bronze: $10-$49
+🥈 Silver: $50-$99
+🥇 Gold: $100-$249
+💎 Platinum: $250-$499
+💠 Diamond: $500-$999
+⭐ VIP: $1,000-$2,499
+👑 Elite: $2,500-$4,999
+🏅 Royal: $5,000-$9,999
+🌟 Legend: $10,000+
+
+📈 كل فئة مستقلة بدورة خاصة (7 اسابيع)`
   },
   'تسجيل': {
     keywords: ['تسجيل', 'register', 'حساب', 'انشاء', 'اشتراك', 'دخول', 'login', 'كلمة سر', 'password'],
-    reply: `📝 *التسجيل في المنصة:*\\n\\n1️⃣ ادخل على الموقع\\n2️⃣ اضغط \"تسجيل\"\\n3️⃣ ادخل اسم مستخدم وكلمة سر\\n4️⃣ استخدم كود احالة (اطلب واحد من الدعم)\\n5️⃣ اضغط \"تسجيل\"\\n\\n✅ بعد التسجيل يمكنك الايداع والبدء`
+    reply: `📝 *التسجيل في المنصة:*
+
+1️⃣ ادخل على الموقع
+2️⃣ اضغط \"تسجيل\"
+3️⃣ ادخل اسم مستخدم وكلمة سر
+4️⃣ استخدم كود احالة (اطلب واحد من الدعم)
+5️⃣ اضغط \"تسجيل\"
+
+✅ بعد التسجيل يمكنك الايداع والبدء`
   },
   'مشكلة': {
     keywords: ['مشكلة', 'error', 'bug', 'غلط', 'ما يشتغل', 'لا يعمل', 'فشل', 'failed', 'مشكلة تقنية'],
-    reply: `🔧 *الدعم الفني:*\\n\\nصفحة المنصة ما تشتغل؟ جرب:\\n1️⃣ امسح الكاش (Ctrl+Shift+Delete)\\n2️⃣ حدث الصفحة (F5)\\n3️⃣ جرب متصفح ثاني\\n4️⃣ تاكد النت شغال\\n\\nلو المشكلة مستمرة، اكتب \"دعم\" وسيوصل رسالتك لفريق الدعم 🎧`
+    reply: `🔧 *الدعم الفني:*
+
+صفحة المنصة ما تشتغل؟ جرب:
+1️⃣ امسح الكاش (Ctrl+Shift+Delete)
+2️⃣ حدث الصفحة (F5)
+3️⃣ جرب متصفح ثاني
+4️⃣ تاكد النت شغال
+
+لو المشكلة مستمرة، اكتب \"دعم\" وسيوصل رسالتك لفريق الدعم 🎧`
   }
 };
 
@@ -92,11 +147,19 @@ const activeTickets = new Map();
 
 async function notifyAdmin(ticketId, userInfo, message, category) {
   if (!ADMIN_TELEGRAM_ID) return;
-  const adminMsg = `🎫 *تذكرة دعم جديدة*\\n\\n` +
-    `📋 التذكرة: #${ticketId}\\n` +
-    `👤 المستخدم: @${userInfo.username || 'مجهول'} (ID: ${userInfo.id})\\n` +
-    `📂 التصنيف: ${category}\\n` +
-    `💬 الرسالة:\\n_${message}_\\n\\n` +
+  const adminMsg = `🎫 *تذكرة دعم جديدة*
+
+` +
+    `📋 التذكرة: #${ticketId}
+` +
+    `👤 المستخدم: @${userInfo.username || 'مجهول'} (ID: ${userInfo.id})
+` +
+    `📂 التصنيف: ${category}
+` +
+    `💬 الرسالة:
+_${message}_
+
+` +
     `✍️ للرد: اضغط على التذكرة في لوحة الادمن`;
   try {
     await sendMessage(ADMIN_TELEGRAM_ID, adminMsg);
@@ -125,7 +188,9 @@ async function handleAdminMessage(msg) {
 
     if (latestTicket) {
       try {
-        await sendMessage(latestTicket.chatId, `💬 *رد من فريق الدعم:*\\n\\n${text}`);
+        await sendMessage(latestTicket.chatId, `💬 *رد من فريق الدعم:*
+
+${text}`);
         console.log(`[BOT] Admin reply forwarded to user ${latestTicket.chatId}`);
       } catch (e) {
         console.error('[BOT] Forward to user failed:', e.message);
@@ -145,7 +210,9 @@ async function handleAdminMessage(msg) {
     }
   }
 
-  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.\\n\\nارسل رقم التذكرة للرد على عميل محدد.`);
+  await sendMessage(chatId, `✅ لا توجد تذاكر مفتوحة حالياً.
+
+ارسل رقم التذكرة للرد على عميل محدد.`);
 }
 
 // Handle user (non-admin) message
@@ -158,15 +225,27 @@ async function handleUserMessage(msg) {
   if (text.startsWith('/') && text !== '/start') return;
 
   if (text === '/start') {
-    const welcome = `👋 *مرحباً بك في الدعم الفني!*\\n\\n` +
-      `انا المساعد الذكي للمنصة 🎧\\n\\n` +
-      `يمكنك سؤالي عن:\\n` +
-      `📥 الايداع والسحب\\n` +
-      `👥 نظام الاحالات\\n` +
-      `🏆 الفئات والمستويات\\n` +
-      `📝 التسجيل\\n` +
-      `🔧 المشاكل التقنية\\n\\n` +
-      `💡 اكتب سؤالك مباشرة وساعدك!\\n` +
+    const welcome = `👋 *مرحباً بك في الدعم الفني!*
+
+` +
+      `انا المساعد الذكي للمنصة 🎧
+
+` +
+      `يمكنك سؤالي عن:
+` +
+      `📥 الايداع والسحب
+` +
+      `👥 نظام الاحالات
+` +
+      `🏆 الفئات والمستويات
+` +
+      `📝 التسجيل
+` +
+      `🔧 المشاكل التقنية
+
+` +
+      `💡 اكتب سؤالك مباشرة وساعدك!
+` +
       `لو ما لقيت جواب، اكتب \"دعم\" ويوصلك فريق الدعم`;
     return sendMessage(chatId, welcome);
   }
@@ -176,8 +255,11 @@ async function handleUserMessage(msg) {
   if (existingTicket && existingTicket.status === 'open') {
     const ticketId = existingTicket.ticketId;
     if (ADMIN_TELEGRAM_ID) {
-      const forwardMsg = `💬 *رسالة جديدة في التذكرة #${ticketId}*\\n\\n` +
-        `👤 @${username || 'مجهول'}\\n` +
+      const forwardMsg = `💬 *رسالة جديدة في التذكرة #${ticketId}*
+
+` +
+        `👤 @${username || 'مجهول'}
+` +
         `📝 _${text}_`;
       try { await sendMessage(ADMIN_TELEGRAM_ID, forwardMsg); } catch (e) {}
     }
@@ -229,10 +311,16 @@ async function createTicket(chatId, userId, username, message, category) {
   activeTickets.set(chatId, { ticketId, status: 'open', category, createdAt: Date.now() });
   await notifyAdmin(ticketId, { id: userId, username }, message, category);
 
-  const replyText = `🎫 *تم فتح تذكرة دعم*\\n\\n` +
-    `📋 رقم التذكرة: #${ticketId}\\n` +
-    `📂 التصنيف: ${category === 'support_request' ? 'طلب مساعدة' : 'عام'}\\n\\n` +
-    `💬 فريق الدعم سيرد عليك قريباً...\\n` +
+  const replyText = `🎫 *تم فتح تذكرة دعم*
+
+` +
+    `📋 رقم التذكرة: #${ticketId}
+` +
+    `📂 التصنيف: ${category === 'support_request' ? 'طلب مساعدة' : 'عام'}
+
+` +
+    `💬 فريق الدعم سيرد عليك قريباً...
+` +
     `⏰ وقت الرد المتوقع: خلال ساعة`;
   return sendMessage(chatId, replyText);
 }
@@ -241,7 +329,9 @@ async function adminReply(ticketId, message) {
   for (const [chatId, ticket] of activeTickets.entries()) {
     if (ticket.ticketId === ticketId && ticket.status === 'open') {
       try {
-        await sendMessage(chatId, `💬 *رد من فريق الدعم:*\\n\\n${message}`);
+        await sendMessage(chatId, `💬 *رد من فريق الدعم:*
+
+${message}`);
         return { success: true };
       } catch (e) { return { error: e.message }; }
     }
@@ -251,7 +341,9 @@ async function adminReply(ticketId, message) {
     const resp = await fetch(`${apiUrl}/api/admin/support/tickets/${ticketId}`);
     const data = await resp.json();
     if (data.success && data.ticket && data.ticket.telegram_chat_id) {
-      await sendMessage(data.ticket.telegram_chat_id, `💬 *رد من فريق الدعم:*\\n\\n${message}`);
+      await sendMessage(data.ticket.telegram_chat_id, `💬 *رد من فريق الدعم:*
+
+${message}`);
       activeTickets.set(data.ticket.telegram_chat_id, { ticketId, status: data.ticket.status, category: data.ticket.category, createdAt: Date.now() });
       return { success: true };
     }
@@ -263,7 +355,9 @@ async function closeTicket(ticketId) {
   for (const [chatId, ticket] of activeTickets.entries()) {
     if (ticket.ticketId === ticketId) {
       ticket.status = 'closed';
-      try { await sendMessage(chatId, `✅ *تم إغلاق التذكرة #${ticketId}*\\n\\nشكراً لتواصلك معنا! لو عندك سؤال جديد، تواصل مانا 🎧`); } catch (e) {}
+      try { await sendMessage(chatId, `✅ *تم إغلاق التذكرة #${ticketId}*
+
+شكراً لتواصلك معنا! لو عندك سؤال جديد، تواصل مانا 🎧`); } catch (e) {}
       try {
         const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
         await fetch(`${apiUrl}/api/support/tickets/${ticketId}/close`, { method: 'POST' });

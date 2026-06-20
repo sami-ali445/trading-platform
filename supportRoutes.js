@@ -209,9 +209,13 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
       try {
         const { sendMessage: tgSendMessage } = require('../telegramBot');
         const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
-        const webMsg = `💬 *رسالة دعم جديدة من الموقع*\n\n` +
-          `👤 المستخدم: ${req.user.username}\n` +
-          `📝 الرسالة:\n_${message.trim()}_`;
+        const webMsg = `💬 *رسالة دعم جديدة من الموقع*
+
+` +
+          `👤 المستخدم: ${req.user.username}
+` +
+          `📝 الرسالة:
+_${message.trim()}_`;
         console.log('[SUPPORT] Sending to Telegram:', adminTelegramId);
         await tgSendMessage(adminTelegramId, webMsg);
         console.log('[SUPPORT] Telegram sent OK');
