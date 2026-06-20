@@ -185,6 +185,20 @@ async function handleAdminMessage(msg) {
   console.log('[BOT] ===== ADMIN MESSAGE REACHED =====');
   console.log('[BOT] Admin chatId:', chatId, 'text:', text.substring(0, 100));
 
+  // 0) Try to extract ticketId from reply_to_message
+  let replyTicketId = null;
+  if (msg.reply_to_message && msg.reply_to_message.text) {
+    const replyText = msg.reply_to_message.text;
+    // Match patterns like: 📋 التذكرة: #WEB-XXXX or #WEB-XXXX or ticket_id in text
+    const ticketMatch = replyText.match(/#([A-Z0-9-]{4,})/);
+    if (ticketMatch) {
+      replyTicketId = ticketMatch[1];
+      console.log('[BOT] Extracted ticketId from reply:', replyTicketId);
+    } else {
+      console.log('[BOT] Could not extract ticketId from reply text:', replyText.substring(0, 100));
+    }
+  }
+
   // 1) Try to find in memory (telegram-originated tickets)
   let latestTicket = null;
   console.log('[BOT] activeTickets size:', activeTickets.size);
@@ -202,23 +216,26 @@ async function handleAdminMessage(msg) {
     }
   }
 
-  // 2) If not found in memory, search DB via public endpoint
+  // 2) If we got a ticketId from reply, use it directly
+  if (replyTicketId && !latestTicket) {
+    console.log('[BOT] Using ticketId from reply:', replyTicketId);
+    latestTicket = { ticketId: replyTicketId, chatId: null };
+  }
+
+  // 3) If not found in memory, search DB via public endpoint
   if (!latestTicket) {
     console.log('[BOT] Not found in memory, searching DB...');
     try {
-      // Use same-origin URL (server calling itself) — works on Render
-      const apiUrl = (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
+      const apiUrl = getApiUrl();
       console.log('[BOT] Searching DB at:', apiUrl + '/api/telegram/open-tickets');
       const resp = await fetch(apiUrl + '/api/telegram/open-tickets');
       const data = await resp.json();
       console.log('[BOT] DB search result:', JSON.stringify(data).substring(0, 300));
       if (data.success && data.tickets && data.tickets.length > 0) {
-        // Prefer a ticket that has telegram_chat_id
         const withTg = data.tickets.find(t => t.telegram_chat_id);
         const t = withTg || data.tickets[0];
         latestTicket = { ticketId: t.ticket_id, chatId: t.telegram_chat_id };
         console.log('[BOT] Found open ticket from DB:', t.ticket_id, 'chat:', t.telegram_chat_id);
-        // Cache it in memory for future replies
         if (t.telegram_chat_id) {
           activeTickets.set(t.telegram_chat_id, { ticketId: t.ticket_id, status: 'open', category: t.category, createdAt: Date.now() });
           console.log('[BOT] Cached ticket for future replies');
@@ -231,17 +248,17 @@ async function handleAdminMessage(msg) {
     }
   }
 
-  // 3) Process the admin reply
+  // 4) Process the admin reply
   if (latestTicket) {
     console.log('[BOT] Processing reply for ticket:', latestTicket.ticketId);
 
-    // Save admin reply to DB via PUBLIC endpoint (no auth needed)
+    // Save admin reply to DB
     try {
-      const apiUrl = (process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com').replace(/\/$/, '');
+      const apiUrl = getApiUrl();
       const saveUrl = apiUrl + '/api/support/messages';
       console.log('[BOT] Saving reply to DB:', saveUrl);
       console.log('[BOT] Payload:', JSON.stringify({ ticketId: latestTicket.ticketId, sender: 'admin', message: text }));
-      
+
       const saveResp = await fetch(saveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,7 +266,7 @@ async function handleAdminMessage(msg) {
       });
       const saveData = await saveResp.json();
       console.log('[BOT] Save to DB result:', JSON.stringify(saveData));
-      
+
       if (!saveData.success) {
         console.error('[BOT] Save to DB FAILED:', saveData.message || 'unknown error');
       }
@@ -261,7 +278,7 @@ async function handleAdminMessage(msg) {
     if (latestTicket.chatId) {
       try {
         console.log('[BOT] Forwarding reply to user telegram:', latestTicket.chatId);
-        await sendMessage(latestTicket.chatId, `💬 <b>رد من فريق الدعم:</b>\n\n${text}`);
+        await sendMessage(latestTicket.chatId, '💬 <b>رد من فريق الدعم:</b>\n\n' + text);
         console.log('[BOT] Reply forwarded to user OK');
       } catch (e) {
         console.error('[BOT] Forward to user telegram FAILED:', e.message);
@@ -273,7 +290,7 @@ async function handleAdminMessage(msg) {
     return;
   }
 
-  // 4) No ticket found at all
+  // 5) No ticket found at all
   console.log('[BOT] No ticket found anywhere, sending "no tickets" message to admin');
   await sendMessage(chatId, '✅ لا توجد تذاكر مفتوحة حالياً.\n\nارسل رقم التذكرة للرد على عميل محدد.');
 }
@@ -352,6 +369,16 @@ async function handleUserMessage(msg) {
 // Main message handler - routes to admin or user handler
 async function handleMessage(msg) {
   const chatId = msg.chat.id;
+
+  // Debug: always log incoming message details
+  console.log('[BOT] ===== INCOMING MESSAGE =====');
+  console.log('[BOT] chatId:', chatId, '| type:', msg.chat?.type);
+  console.log('[BOT] isAdmin:', isAdmin(chatId), '| ADMIN_TELEGRAM_ID:', ADMIN_TELEGRAM_ID);
+  console.log('[BOT] text:', (msg.text || '').substring(0, 100));
+  console.log('[BOT] reply_to_message:', msg.reply_to_message ? 'YES' : 'NO');
+  if (msg.reply_to_message) {
+    console.log('[BOT] reply_to_message text:', (msg.reply_to_message.text || '').substring(0, 100));
+  }
 
   if (isAdmin(chatId)) {
     await handleAdminMessage(msg);
