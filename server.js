@@ -698,6 +698,8 @@ setInterval(() => {
     await withDb(async (c) => {
       await c.query('ALTER TABLE deposits ADD COLUMN IF NOT EXISTS proof_image TEXT');
       await c.query('ALTER TABLE deposits ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP');
+      await c.query('ALTER TABLE withdraws ADD COLUMN IF NOT EXISTS transferred_at TIMESTAMP');
+      await c.query('ALTER TABLE withdraws ADD COLUMN IF NOT EXISTS transfer_note TEXT');
       // Create index for TxID lookup
       await c.query('CREATE INDEX IF NOT EXISTS idx_deposits_txid ON deposits(tx_id)');
     });
@@ -1114,6 +1116,32 @@ app.post('/api/admin/withdraws/:id/approve', authenticateToken, requireAdmin, as
     const r = await adminApproveWithdraw(req.params.id);
     if (r.error) return res.status(400).json({ success: false, message: r.error });
     res.json({ success: true, message: 'Approved.', withdraw: r.withdraw });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Mark withdraw as transferred (admin manually sent the money)
+app.post('/api/admin/withdraws/:id/transferred', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { note } = req.body;
+    const wdId = req.params.id;
+    
+    // Check withdraw exists and is approved
+    const wds = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT * FROM withdraws WHERE id=$1', [wdId]);
+      return rows;
+    });
+    if (!wds || !wds.length) return res.status(404).json({ success: false, message: 'Withdraw not found.' });
+    if (wds[0].status !== 'approved') return res.status(400).json({ success: false, message: 'Withdraw must be approved first.' });
+    
+    // Mark as transferred
+    await withDb(async (c) => {
+      await c.query(
+        'UPDATE withdraws SET transferred_at=NOW(), transfer_note=$1 WHERE id=$2',
+        [note || null, wdId]
+      );
+    });
+    
+    res.json({ success: true, message: 'تم تسجيل التحويل بنجاح.' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
