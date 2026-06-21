@@ -1089,15 +1089,18 @@ function Admin({ onLogout }) {
       {(reqs.withdraws || []).filter(w => w.status === 'approved' && !w.transferred_at).length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات بانتظار التحويل.</p> : reqs.withdraws.filter(w => w.status === 'approved' && !w.transferred_at).map(w => (
         <div key={w.id} className="admin-req" style={{ borderRight: '3px solid #007bff', animation: 'reqSlideIn 0.3s ease' }}>
           <div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.createdAt).toLocaleString('ar')}</span> | <span style={{ fontSize: 11, color: '#28a745' }}>✅ تمت الموافقة</span></div>
+          <div style={{ margin: '8px 0' }}>
+            <input id={'note-' + w.id} placeholder="ملاحظة (اختياري): رقم المعاملة، اسم المكتب، ..." style={{ ...s.inp, fontSize: 12, padding: 6 }} />
+          </div>
           <div className="admin-actions">
-            <button className="btn-approve" onClick={async () => { try { await API.post('/api/admin/withdraws/' + w.id + '/transferred', { note: '' }); setMsg('✅ تم تسجيل التحويل'); refresh(); } catch (e) { setMsg('❌ خطأ'); } }}>✅ تم التحويل</button>
+            <button className="btn-approve" onClick={async () => { const note = document.getElementById('note-' + w.id).value; try { await API.post('/api/admin/withdraws/' + w.id + '/transferred', { note }); setMsg('✅ تم تسجيل التحويل'); refresh(); } catch (e) { setMsg('❌ خطأ'); } }}>✅ تم التحويل</button>
           </div>
         </div>
       ))}
       <h3 style={{ color: 'var(--text3)', marginTop: 20 }}>📋 السجل الكامل للسحوبات</h3>
       {(reqs.withdraws || []).filter(w => w.transferred_at).length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد سحوبات محولة بعد.</p> : reqs.withdraws.filter(w => w.transferred_at).map(w => (
         <div key={w.id} className="admin-req" style={{ borderRight: '3px solid var(--text3)', opacity: 0.7 }}>
-          <div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--accent)' }}>✅ تم التحويل</span> | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.transferred_at).toLocaleString('ar')}</span></div>
+          <div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--accent)' }}>✅ تم التحويل</span> | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.transferred_at).toLocaleString('ar')}</span>{w.transfer_note && <span style={{ fontSize: 11, color: 'var(--text3)', marginRight: 8 }}>📝 {w.transfer_note}</span>}</div>
         </div>
       ))}</div>}
       {tab === 'support' && <AdminSupportPanel user={{ username: 'admin', isAdmin: true }} />}
