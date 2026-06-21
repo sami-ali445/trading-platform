@@ -774,6 +774,23 @@ app.post('/api/deposit', authenticateToken, depositLimiter, async (req, res) => 
     });
 
     res.json({ success: true, message: 'تم إرسال طلب الإيداع. لازم يتم التحقق خلال ساعتين.', deposit: { id: depositId, amount: amt, tier: tierKey, status: 'pending', expiresAt }, wallet: USDT_WALLET });
+
+    // Send Telegram notification to admin
+    try {
+      const { sendMessage } = require('./telegramBot');
+      const adminTelegramId = process.env.ADMIN_TELEGRAM_ID || '8916948567';
+      const tronscanUrl = 'https://tronscan.org/#/transaction/' + cleanTxId;
+      const proofMsg = '📥 <b>إيداع جديد!</b>\n\n' +
+        '👤 المستخدم: ' + user.username + '\n' +
+        '💰 المبلغ: $' + amt + '\n' +
+        '📊 الخطة: ' + tierKey + '\n' +
+        '🔗 TxID: <code>' + cleanTxId + '</code>\n' +
+        '⏰ المهلة: ساعتين\n' +
+        '\n🔍 <a href="' + tronscanUrl + '">تحقق من Tronscan</a>';
+      sendMessage(adminTelegramId, proofMsg).catch(function(e) { console.error('[DEPOSIT] Telegram notify failed:', e.message); });
+    } catch (e) {
+      console.error('[DEPOSIT] Telegram notify error:', e.message);
+    }
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
