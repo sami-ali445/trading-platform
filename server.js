@@ -682,9 +682,31 @@ app.get('/api/tiers', (req, res) => {
 });
 
 // ============ DEPOSIT ============
+
+// Used TxIDs store (prevents reuse)
+const usedTxIds = new Map(); // txId -> { username, usedAt }
+setInterval(() => {
+  const now = Date.now();
+  for (const [txId, data] of usedTxIds) {
+    if (now - data.usedAt > 86400000) usedTxIds.delete(txId); // cleanup after 24h
+  }
+}, 3600000);
+
+// Ensure deposits table has proof_image column
+(async function ensureDepositsSchema() {
+  try {
+    await withDb(async (c) => {
+      await c.query('ALTER TABLE deposits ADD COLUMN IF NOT EXISTS proof_image TEXT');
+      await c.query('ALTER TABLE deposits ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP');
+      // Create index for TxID lookup
+      await c.query('CREATE INDEX IF NOT EXISTS idx_deposits_txid ON deposits(tx_id)');
+    });
+  } catch (e) { console.error('[DB] deposits schema:', e.message); }
+})();
+
 app.post('/api/deposit', authenticateToken, depositLimiter, async (req, res) => {
   try {
-    const { amount, txId } = req.body;
+    const { amount, txId, proofImage } = req.body;
     if (amount === null || amount === undefined || amount === '') return res.status(400).json({ success: false, message: 'Amount required.' });
     if (typeof amount !== 'number') { logAttack('DEP_TYPE', req.ip, 'Non-number: ' + typeof amount); return res.status(400).json({ success: false, message: 'Amount must be a number.' }); }
     if (!Number.isFinite(amount)) return res.status(400).json({ success: false, message: 'Must be finite.' });
@@ -696,18 +718,53 @@ app.post('/api/deposit', authenticateToken, depositLimiter, async (req, res) => 
     const cleanTxId = sanitizeTxId(txId);
     if (!cleanTxId) return res.status(400).json({ success: false, message: 'Valid TxID required.' });
 
+    // Check if TxID was already used
+    if (usedTxIds.has(cleanTxId)) {
+      const prev = usedTxIds.get(cleanTxId);
+      logAttack('TXID_REUSE', req.ip, 'TxID: ' + cleanTxId + ' by ' + req.user.username + ' (first used by ' + prev.username + ')');
+      return res.status(400).json({ success: false, message: 'هذا الـ TxID مستخدم مسبقاً. كل تحويل لازم يكون له رقم معاملة فريد.' });
+    }
+
+    // Validate proof image (base64 data URI)
+    let proofImagePath = null;
+    if (proofImage && typeof proofImage === 'string' && proofImage.startsWith('data:image/')) {
+      try {
+        const matches = proofImage.match(/^data:image\/(\w+);base64,(.+)$/);
+        if (matches) {
+          const ext = matches[1];
+          const base64Data = matches[2];
+          const imgBuffer = Buffer.from(base64Data, 'base64');
+          // Limit to 5MB
+          if (imgBuffer.length > 5 * 1024 * 1024) {
+            return res.status(400).json({ success: false, message: 'الصورة كبيرة جداً. الحد الأقصى 5MB.' });
+          }
+          const imgName = `deposit_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const imgDir = path.join(__dirname, 'uploads', 'deposits');
+          fs.mkdirSync(imgDir, { recursive: true });
+          fs.writeFileSync(path.join(imgDir, imgName), imgBuffer);
+          proofImagePath = `/uploads/deposits/${imgName}`;
+        }
+      } catch (e) {
+        console.error('[DEPOSIT] Image save failed:', e.message);
+      }
+    }
+
     const user = await withDb(async (c) => {
       const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [req.user.username]);
       return rows[0];
     });
     if (!user) return res.status(404).json({ success: false, message: 'Not found.' });
 
-    // Create deposit record
+    // Mark TxID as used
+    usedTxIds.set(cleanTxId, { username: user.username, usedAt: Date.now() });
+
+    // Create deposit record with 2-hour expiry
     const depositId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
     await withDb(async (c) => {
       await c.query(
-        'INSERT INTO deposits (id, username, tier, amount, tx_id, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,NOW())',
-        [depositId, user.username, tierKey, amt, cleanTxId, 'pending']
+        'INSERT INTO deposits (id, username, tier, amount, tx_id, proof_image, status, expires_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())',
+        [depositId, user.username, tierKey, amt, cleanTxId, proofImagePath, 'pending', expiresAt]
       );
       // Also add to tier deposits
       await c.query(
@@ -716,7 +773,7 @@ app.post('/api/deposit', authenticateToken, depositLimiter, async (req, res) => 
       );
     });
 
-    res.json({ success: true, message: 'Deposit submitted for ' + tierKey + ' tier.', deposit: { id: depositId, amount: amt, tier: tierKey, status: 'pending' }, wallet: USDT_WALLET });
+    res.json({ success: true, message: 'تم إرسال طلب الإيداع. لازم يتم التحقق خلال ساعتين.', deposit: { id: depositId, amount: amt, tier: tierKey, status: 'pending', expiresAt }, wallet: USDT_WALLET });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1003,6 +1060,14 @@ app.get('/api/admin/deposits', authenticateToken, requireAdmin, async (req, res)
 
 app.post('/api/admin/deposits/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    // Check if deposit is expired
+    const depCheck = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT expires_at FROM deposits WHERE id=$1', [req.params.id]);
+      return rows[0];
+    });
+    if (depCheck && depCheck.expires_at && new Date(depCheck.expires_at) < new Date()) {
+      return res.status(400).json({ success: false, message: 'انتهت مهلة هذا الطلب. لازم المستخدم يسوي طلب جديد.' });
+    }
     const r = await adminApproveDeposit(req.params.id);
     if (r.error) return res.status(400).json({ success: false, message: r.error });
     res.json({ success: true, message: 'Approved.', deposit: r.deposit });
@@ -1199,6 +1264,9 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
     console.error('[AUTO-BUILD] Failed:', e.message);
   }
 })();
+
+// Serve uploaded deposit proof images
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { maxAge: '1h' }));
 
 // ============ STATIC FILES ============
 

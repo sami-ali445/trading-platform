@@ -792,15 +792,36 @@ function Dashboard({ user: initUser, onLogout }) {
   useEffect(() => { refresh(); loadRefs(); loadTxns(); const i = setInterval(refresh, 15000); return () => clearInterval(i); }, []);
 
   const copyRef = () => { navigator.clipboard.writeText(user.referralCode); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const [proofImg, setProofImg] = useState(null);
+  const [proofPreview, setProofPreview] = useState(null);
+
+  const handleProofImage = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setMsg('❌ لازم تكون صورة!'); return; }
+    if (file.size > 5 * 1024 * 1024) { setMsg('❌ الصورة كبيرة جداً. الحد الأقصى 5MB!'); return; }
+    setProofImg(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setProofPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
   const doDeposit = async () => {
     const amt = Number(depAmount);
     if (!amt || amt < 10) { setMsg('❌ الحد الأدنى للإيداع $10!'); return; }
     if (!depTx || !depTx.trim()) { setMsg('❌ أدخل رقم المعاملة (TxID) من Tronscan!'); return; }
+    if (!proofImg) { setMsg('❌ لازم ترفع صورة إثبات الدفع!'); return; }
     setDepLoading(true); setMsg('');
     try {
-      const r = await API.post('/deposit', { amount: amt, txId: depTx.trim() });
-      setMsg(`✅ ${r.data.message} | الخطة: ${r.data.tier || ''}`);
-      setDepAmount(''); setDepTx('');
+      const proofBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(proofImg);
+      });
+      const r = await API.post('/deposit', { amount: amt, txId: depTx.trim(), proofImage: proofBase64 });
+      setMsg(`✅ ${r.data.message}`);
+      setDepAmount(''); setDepTx(''); setProofImg(null); setProofPreview(null);
       refresh();
     } catch (e) {
       console.error('[DEPOSIT ERROR]', e);
@@ -880,7 +901,7 @@ function Dashboard({ user: initUser, onLogout }) {
       {tab === 'converter' && <CryptoConverter />}
       {tab === 'faq' && <KnowledgeBase />}
 
-      {tab === 'deposit' && (<div style={s.tc}><h3 style={{ color: '#28a745' }}>📥 إيداع USDT (TRC20)</h3><div style={{ background: 'var(--bg2)', padding: 15, borderRadius: 10, margin: '15px 0', border: '1px dashed var(--accent)' }}><p style={{ fontSize: 12, color: 'var(--text3)' }}>عنوان المحفظة (TRC20):</p><code style={{ color: 'var(--accent)', wordBreak: 'break-all', fontSize: 12 }}>TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn</code></div><hr style={{ borderColor: 'var(--border)', margin: '15px 0' }} /><p style={{ fontSize: 13, color: 'var(--warning)' }}>⚠️ أرسل المبلغ للمحفظة أعلاه ثم أدخل المبلغ وTxID:</p><div style={{ background: 'var(--bg3)', padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 12 }}><strong>نطاقات الخطط:</strong> Bronze $10-49 ($4/week) | Silver $50-99 ($8/week) | Platinum $100-499 ($20/week) | Gold $500+ ($100/week)</div><input style={{ ...s.inp, borderColor: Number(depAmount) >= 10 ? 'var(--accent)' : 'var(--danger)' }} type="number" placeholder="المبلغ (الحد الأدنى $10)" value={depAmount} onChange={e => setDepAmount(e.target.value)} min="10" /><div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>{Number(depAmount) >= 10 ? 'الخطة: ' + (Number(depAmount) >= 500 ? 'Gold - $100/week' : Number(depAmount) >= 100 ? 'Platinum - $20/week' : Number(depAmount) >= 50 ? 'Silver - $8/week' : 'Bronze - $4/week') : 'أدخل المبلغ لعرض الخانة'}</div><input style={s.inp} placeholder="TxID من Tronscan" value={depTx} onChange={e => setDepTx(e.target.value)} /><button style={{ ...s.btn('#28a745'), opacity: depLoading ? 0.7 : 1 }} onClick={doDeposit} disabled={depLoading}>{depLoading ? 'جاري الإرسال...' : 'تأكيد الإيداع'}</button></div>)}
+      {tab === 'deposit' && (<div style={s.tc}><h3 style={{ color: '#28a745' }}>📥 إيداع USDT (TRC20)</h3><div style={{ background: 'var(--bg2)', padding: 15, borderRadius: 10, margin: '15px 0', border: '1px dashed var(--accent)' }}><p style={{ fontSize: 12, color: 'var(--text3)' }}>عنوان المحفظة (TRC20):</p><code style={{ color: 'var(--accent)', wordBreak: 'break-all', fontSize: 12 }}>TLhmbZbsvRhf2TpGiotkHnbv7YBfxbKprn</code></div><hr style={{ borderColor: 'var(--border)', margin: '15px 0' }} /><p style={{ fontSize: 13, color: 'var(--warning)' }}>⚠️ أرسل المبلغ للمحفظة أعلاه ثم أدخل المبلغ وTxID وصورة الإثبات:</p><div style={{ background: 'var(--bg3)', padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 12 }}><strong>نطاقات الخطط:</strong> Bronze $10-49 ($4/week) | Silver $50-99 ($8/week) | Platinum $100-499 ($20/week) | Gold $500+ ($100/week)</div><input style={{ ...s.inp, borderColor: Number(depAmount) >= 10 ? 'var(--accent)' : 'var(--danger)' }} type="number" placeholder="المبلغ (الحد الأدنى $10)" value={depAmount} onChange={e => setDepAmount(e.target.value)} min="10" /><div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>{Number(depAmount) >= 10 ? 'الخطة: ' + (Number(depAmount) >= 500 ? 'Gold - $100/week' : Number(depAmount) >= 100 ? 'Platinum - $20/week' : Number(depAmount) >= 50 ? 'Silver - $8/week' : 'Bronze - $4/week') : 'أدخل المبلغ لعرض الخانة'}</div><input style={s.inp} placeholder="TxID من Tronscan" value={depTx} onChange={e => setDepTx(e.target.value)} /><div style={{ margin: '12px 0' }}><label style={{ fontSize: 13, color: 'var(--warning)', display: 'block', marginBottom: 6 }}>📷 صورة إثبات الدفع (إجباري):</label><input type="file" accept="image/*" onChange={handleProofImage} style={{ ...s.inp, padding: 8 }} />{proofPreview && <div style={{ marginTop: 8 }}><img src={proofPreview} alt="preview" style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8, border: '1px solid var(--border)' }} /><p style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4 }}>✅ تم اختيار الصورة</p></div>}</div><button style={{ ...s.btn('#28a745'), opacity: depLoading ? 0.7 : 1 }} onClick={doDeposit} disabled={depLoading}>{depLoading ? 'جاري الإرسال...' : 'تأكيد الإيداع'}</button></div>)}
 
       {tab === 'withdraw' && (<div style={s.tc}><h3 style={{ color: 'var(--danger)' }}>📤 سحب الأرباح</h3>{user.windowExpired && <div className="warn-box warn-red"><strong>انتهت فترة التشغيل (90 يوم)!</strong> تواصل مع الإدارة.</div>}{!tier && <div className="warn-box warn-red">⚠️ فعّل خطة أولاً لتتمكن من السحب</div>}{tier && !user.windowExpired && !canWd && <div className="warn-box warn-red"><strong>السحب مقفل!</strong> تحتاج 3 إحالات مباشرة مؤكدة (بإيداع موافق عليه) على الأقل.<br />حالياً: {user.approvedDownlineCount || 0} / 3</div>}{tier && canWd && !user.windowExpired && <div className="warn-box warn-green">✅ السحب مفتوح | الحد الأسبوعي: ${weeklyRemaining} متبقي من ${tier.cap}$</div>}{user.windowExpiresAt && !user.windowExpired && <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 8 }}>تنتهي فترة التشغيل: {new Date(user.windowExpiresAt).toLocaleDateString('ar')}</div>}<input style={s.inp} placeholder={`المبلغ (الحد الأقصى: $${weeklyRemaining})`} type="number" value={wdAmt} onChange={e => setWdAmt(e.target.value)} disabled={!tier || !canWd || user.windowExpired} /><button style={{ ...s.btn('#dc3545'), opacity: (tier && canWd && !user.windowExpired) ? 1 : 0.5 }} onClick={doWithdraw} disabled={!tier || !canWd || user.windowExpired}>💸 طلب السحب</button></div>)}
 
@@ -1027,7 +1048,20 @@ function Admin({ onLogout }) {
         ))}
       </div>
       {msg && <div style={s.msg}>{msg}</div>}
-      {tab === 'requests' && <div style={s.tc}><h3 style={{ color: '#28a745' }}>📥 طلبات الإيداع ({pendingDeposits})</h3>{(reqs.deposits || []).filter(d => d.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.deposits.filter(d => d.status === 'pending').map(d => (<div key={d.id} className="admin-req" style={{ borderRight: '3px solid #28a745', animation: 'reqSlideIn 0.3s ease' }}><div><strong>👤 {d.username}</strong> | ${d.amount} | <code style={{ fontSize: 11 }}>{d.txId}</code> | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(d.createdAt).toLocaleString('ar')}</span></div><div className="admin-actions"><button className="btn-approve" onClick={() => act(d.id, 'deposit', 'Approve')}>✅ موافقة</button><button className="btn-reject" onClick={() => act(d.id, 'deposit', 'Reject')}>❌ رفض</button></div></div>))}<h3 style={{ color: 'var(--danger)', marginTop: 20 }}>📤 طلبات السحب ({pendingWithdraws})</h3>{(reqs.withdraws || []).filter(w => w.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.withdraws.filter(w => w.status === 'pending').map(w => (<div key={w.id} className="admin-req" style={{ borderRight: '3px solid #dc3545', animation: 'reqSlideIn 0.3s ease' }}><div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.createdAt).toLocaleString('ar')}</span></div><div className="admin-actions"><button className="btn-approve" onClick={() => act(w.id, 'withdraw', 'Approve')}>💸 موافقة</button><button className="btn-reject" onClick={() => act(w.id, 'withdraw', 'Reject')}>❌ رفض</button></div></div>))}</div>}
+      {tab === 'requests' && <div style={s.tc}><h3 style={{ color: '#28a745' }}>📥 طلبات الإيداع ({pendingDeposits})</h3>{(reqs.deposits || []).filter(d => d.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.deposits.filter(d => d.status === 'pending').map(d => {
+        const isExpired = d.expires_at && new Date(d.expires_at) < new Date();
+        const timeLeft = d.expires_at ? Math.max(0, Math.floor((new Date(d.expires_at) - Date.now()) / 60000)) : null;
+        return (<div key={d.id} className="admin-req" style={{ borderRight: '3px solid #28a745', animation: 'reqSlideIn 0.3s ease', opacity: isExpired ? 0.5 : 1 }}>
+          <div><strong>👤 {d.username}</strong> | ${d.amount} | <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{d.txId}</code> | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(d.createdAt).toLocaleString('ar')}</span>
+          {timeLeft !== null && <span style={{ fontSize: 11, color: timeLeft < 30 ? 'var(--danger)' : 'var(--warning)', marginRight: 8 }}>⏰ {timeLeft} دقيقة متبقية</span>}
+          {isExpired && <span style={{ fontSize: 11, color: 'var(--danger)', marginRight: 8 }}>❌ انتهت المهلة</span>}
+          </div>
+          {d.proof_image && <div style={{ margin: '8px 0' }}><p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>📷 صورة الإثبات:</p><img src={d.proof_image} alt="proof" style={{ maxWidth: 300, maxHeight: 200, borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => window.open(d.proof_image, '_blank')} /></div>}
+          {!d.proof_image && <p style={{ fontSize: 11, color: 'var(--danger)', margin: '4px 0' }}>⚠️ لا توجد صورة إثبات</p>}
+          <div style={{ margin: '6px 0' }}><a href={`https://tronscan.org/#/transaction/${d.txId}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#007bff' }}>🔗 تحقق من Tronscan</a></div>
+          <div className="admin-actions"><button className="btn-approve" onClick={() => act(d.id, 'deposit', 'Approve')} disabled={isExpired}>✅ موافقة</button><button className="btn-reject" onClick={() => act(d.id, 'deposit', 'Reject')}>❌ رفض</button></div>
+        </div>);
+      })}<h3 style={{ color: 'var(--danger)', marginTop: 20 }}>📤 طلبات السحب ({pendingWithdraws})</h3>{(reqs.withdraws || []).filter(w => w.status === 'pending').length === 0 ? <p style={{ color: 'var(--text3)' }}>لا توجد طلبات معلقة.</p> : reqs.withdraws.filter(w => w.status === 'pending').map(w => (<div key={w.id} className="admin-req" style={{ borderRight: '3px solid #dc3545', animation: 'reqSlideIn 0.3s ease' }}><div><strong>👤 {w.username}</strong> | ${w.amount} | <span style={{ fontSize: 11, color: 'var(--text3)' }}>{new Date(w.createdAt).toLocaleString('ar')}</span></div><div className="admin-actions"><button className="btn-approve" onClick={() => act(w.id, 'withdraw', 'Approve')}>💸 موافقة</button><button className="btn-reject" onClick={() => act(w.id, 'withdraw', 'Reject')}>❌ رفض</button></div></div>))}</div>}
       {tab === 'support' && <AdminSupportPanel user={{ username: 'admin', isAdmin: true }} />}
       {tab === 'users' && <div style={s.tc}><h3>👥 المستخدمين ({users.length})</h3><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>المستخدم</th><th>الرصيد</th><th>الخطة</th><th>العمولات</th><th>الإحالات</th></tr></thead><tbody>{users.map(u => <tr key={u.username}><td>{u.username}</td><td>${Number(u.balance||0).toFixed(2)}</td><td>{u.activePlan || '—'}</td><td style={{ color: 'var(--accent)' }}>${Number(u.totalCommission||0).toFixed(2)}</td><td>{u.activeReferrals || 0}/{u.totalReferrals || 0}</td></tr>)}</tbody></table></div></div>}
       {tab === 'settings' && <div style={s.tc}><h3>⚙️ الإعدادات</h3><h4 style={{ marginTop: 15 }}>محفظة USDT</h4><input style={s.inp} value={nWallet} onChange={e => setNWallet(e.target.value)} placeholder="عنوان TRC20" /><button style={s.btn('#007bff')} onClick={updWallet}>تحديث</button></div>}
