@@ -1011,8 +1011,8 @@ function Admin({ onLogout }) {
       setReqs({ deposits: newDeposits, withdraws: newWithdraws });
     } catch {}
   };
-  const loadUsers = async () => { try { const r = await API.get('/admin/users'); console.log('[LOAD USERS]', r.data.success, r.data.users?.length); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
-  const loadTxns = async () => { try { const r = await API.get('/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
+  const loadUsers = async () => { try { const r = await API.get('/admin/users'); if (r.data.success) setUsers(r.data.users || []); } catch(e) { setUsers([]); } };
+  const loadTxns = async () => { try { const r = await API.get('/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { setTxns([]); } };
 
   useEffect(() => { refresh(); loadUsers(); loadTxns(); const i = setInterval(() => { refresh(); }, 10000); const j = setInterval(() => { loadUsers(); loadTxns(); }, 30000); return () => { clearInterval(i); clearInterval(j); }; }, []);
 
