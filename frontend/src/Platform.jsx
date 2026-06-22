@@ -1014,7 +1014,7 @@ function Admin({ onLogout }) {
   const loadUsers = async () => { try { const r = await API.get('/api/admin/users'); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
   const loadTxns = async () => { try { const r = await API.get('/api/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
 
-  useEffect(() => { refresh(); loadUsers(); loadTxns(); const i = setInterval(() => { refresh(); loadUsers(); loadTxns(); }, 10000); return () => clearInterval(i); }, []);
+  useEffect(() => { refresh(); loadUsers(); loadTxns(); const i = setInterval(() => { refresh(); }, 10000); const j = setInterval(() => { loadUsers(); loadTxns(); }, 30000); return () => { clearInterval(i); clearInterval(j); }; }, []);
 
   const act = async (id, type, action) => { try { await API.post('/api/admin/action', { id, type, action }); setMsg(`✅ ${action === 'Approve' ? 'موافقة' : 'رفض'}`); refresh(); } catch { setMsg('❌ خطأ'); } };
   const updWallet = async () => { try { await API.post('/api/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
