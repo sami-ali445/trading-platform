@@ -1000,7 +1000,7 @@ function Admin({ onLogout }) {
 
   const refresh = async () => {
     try {
-      const [dr, wr] = await Promise.all([API.get('/api/admin/deposits'), API.get('/api/admin/withdraws')]);
+      const [dr, wr] = await Promise.all([API.get('/admin/deposits'), API.get('/admin/withdraws')]);
       const newDeposits = dr.data.deposits || [];
       const newWithdraws = wr.data.withdraws || [];
       const newPending = newDeposits.filter(d => d.status === 'pending').length + newWithdraws.filter(w => w.status === 'pending').length;
@@ -1011,13 +1011,13 @@ function Admin({ onLogout }) {
       setReqs({ deposits: newDeposits, withdraws: newWithdraws });
     } catch {}
   };
-  const loadUsers = async () => { try { const r = await API.get('/api/admin/users'); console.log('[LOAD USERS]', r.data.success, r.data.users?.length); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
-  const loadTxns = async () => { try { const r = await API.get('/api/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
+  const loadUsers = async () => { try { const r = await API.get('/admin/users'); console.log('[LOAD USERS]', r.data.success, r.data.users?.length); if (r.data.success) setUsers(r.data.users || []); } catch(e) { console.error('[ADMIN USERS ERROR]', e.response?.data || e.message); setUsers([]); } };
+  const loadTxns = async () => { try { const r = await API.get('/admin/transactions'); if (r.data.success) setTxns(r.data.transactions || []); } catch(e) { console.error('[ADMIN TXNS ERROR]', e.response?.data || e.message); setTxns([]); } };
 
   useEffect(() => { refresh(); loadUsers(); loadTxns(); const i = setInterval(() => { refresh(); }, 10000); const j = setInterval(() => { loadUsers(); loadTxns(); }, 30000); return () => { clearInterval(i); clearInterval(j); }; }, []);
 
-  const act = async (id, type, action) => { try { await API.post('/api/admin/action', { id, type, action }); setMsg(`✅ ${action === 'Approve' ? 'موافقة' : 'رفض'}`); refresh(); } catch { setMsg('❌ خطأ'); } };
-  const updWallet = async () => { try { await API.post('/api/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
+  const act = async (id, type, action) => { try { await API.post('/admin/action', { id, type, action }); setMsg(`✅ ${action === 'Approve' ? 'موافقة' : 'رفض'}`); refresh(); } catch { setMsg('❌ خطأ'); } };
+  const updWallet = async () => { try { await API.post('/admin/update-wallet', { wallet: nWallet }); setMsg('✅ تم التحديث'); setNWallet(''); refresh(); } catch { setMsg('❌ خطأ'); } };
 
   const tabLabel = (t) => {
   if (t === 'support') return '🎫 الدعم الفني';
@@ -1093,7 +1093,7 @@ function Admin({ onLogout }) {
             <input id={'note-' + w.id} placeholder="ملاحظة (اختياري): رقم المعاملة، اسم المكتب، ..." style={{ ...s.inp, fontSize: 12, padding: 6 }} />
           </div>
           <div className="admin-actions">
-            <button className="btn-approve" onClick={async () => { const note = document.getElementById('note-' + w.id).value; try { await API.post('/api/admin/withdraws/' + w.id + '/transferred', { note }); setMsg('✅ تم تسجيل التحويل'); refresh(); } catch (e) { setMsg('❌ خطأ'); } }}>✅ تم التحويل</button>
+            <button className="btn-approve" onClick={async () => { const note = document.getElementById('note-' + w.id).value; try { await API.post('/admin/withdraws/' + w.id + '/transferred', { note }); setMsg('✅ تم تسجيل التحويل'); refresh(); } catch (e) { setMsg('❌ خطأ'); } }}>✅ تم التحويل</button>
           </div>
         </div>
       ))}
