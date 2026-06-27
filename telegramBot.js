@@ -33,7 +33,9 @@ async function sendMessage(chatId, text, opts = {}) {
 }
 
 async function setWebhook(url) {
-  return tgSend('setWebhook', { url });
+  const secretHash = crypto.createHash('sha256').update(BOT_TOKEN).digest();
+  const secretToken = crypto.createHmac('sha256', secretHash).update(BOT_TOKEN).digest('hex');
+  return tgSend('setWebhook', { url, secret_token: secretToken });
 }
 
 async function processUpdate(update) {
@@ -452,27 +454,72 @@ async function closeTicket(ticketId) {
   return { error: 'Ticket not found' };
 }
 
+// ============ TELEGRAM SIGNATURE VERIFICATION ============
+const crypto = require('crypto');
+
+function verifyTelegramSignature(req) {
+  try {
+    const secretHash = crypto.createHash('sha256')
+      .update(BOT_TOKEN)
+      .digest();
+    
+    const headerToken = req.headers['x-telegram-bot-api-secret-token'];
+    const expectedSecret = crypto.createHmac('sha256', secretHash)
+      .update(BOT_TOKEN)
+      .digest('hex');
+    
+    if (!headerToken) {
+      console.warn('[WEBHOOK] No secret token header received');
+      return false;
+    }
+    
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(headerToken, 'hex'),
+      Buffer.from(expectedSecret, 'hex')
+    );
+    
+    if (!isValid) {
+      console.warn('[WEBHOOK] Invalid secret token');
+    }
+    
+    return isValid;
+  } catch (e) {
+    console.error('[WEBHOOK] Signature verification error:', e.message);
+    return false;
+  }
+}
+
 // ============ WEBHOOK SETUP ============
 function setupWebhook(app, webhookPath = '/webhook/telegram') {
-  app.post(webhookPath, (req, res) => {
-    console.log('[WEBHOOK] Received:', JSON.stringify(req.body).substring(0, 200));
-    processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
-    res.sendStatus(200);
-  });
-
-  // Build webhook URL: explicit env var > Render external URL > known URL
+  // Set webhook URL FIRST (before route registration for immediate availability)
   var renderUrl = process.env.RENDER_EXTERNAL_URL;
   var webhookUrl = process.env.TELEGRAM_WEBHOOK_URL
     || (renderUrl ? renderUrl.replace(/\/$/, '') : null)
     || 'https://trading-platform-iglr.onrender.com';
 
-  setWebhook(webhookUrl + webhookPath).then(function() {
+  setWebhook(webhookPath).then(function() {
     console.log('[TELEGRAM] Webhook set to:', webhookUrl + webhookPath);
   }).catch(function(e) {
     console.error('[TELEGRAM] Webhook setup failed:', e.message);
   });
 
-  console.log('[TELEGRAM] Bot initialized. Admin ID:', ADMIN_TELEGRAM_ID);
+  // Webhook route with signature verification
+  app.post(webhookPath, (req, res) => {
+    // Verify Telegram signature
+    if (!verifyTelegramSignature(req)) {
+      console.warn('[WEBHOOK] Rejected: invalid signature from', req.ip);
+      return res.status(403).send('Forbidden');
+    }
+    
+    console.log('[WEBHOOK] Received valid update:', JSON.stringify(req.body).substring(0, 200));
+    processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
+    
+    // Respond immediately to avoid Telegram retries
+    res.status(200).json({ ok: true });
+  });
+
+  console.log('[TELEGRAM] Bot initialized with signature verification. Admin ID:', ADMIN_TELEGRAM_ID);
+  console.log('[TELEGRAM] Webhook URL:', webhookUrl + webhookPath);
 }
 
 // ============ EXPORTS ============
