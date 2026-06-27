@@ -901,6 +901,55 @@ async function checkTierReferrals(username, tier) {
   return { count: (rows || []).length, approved: (rows || []).map(r => r.referred_username) };
 }
 
+async function activateUserTier(username, tierKey) {
+  try {
+    const nowMs = Date.now();
+    await withDb(async (c) => {
+      // Set active plan
+      await c.query('UPDATE users SET active_plan=$1 WHERE username=$2', [tierKey, username]);
+      // Activate cycle
+      await c.query(
+        'UPDATE user_tier_cycles SET cycle_start=$1, cycle_week=1, week_start=$1 WHERE username=$2 AND tier=$3',
+        [nowMs, username, tierKey]
+      );
+      // Activate referrals for this tier
+      await c.query('UPDATE user_tier_referrals SET is_active=TRUE WHERE referred_username=$1 AND tier=$2', [username, tierKey]);
+    });
+
+    // Pay commissions ONLY now (after activation)
+    const user = await withDb(async (c) => {
+      const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [username]);
+      return rows[0];
+    });
+    if (user && user.referred_by && user.referred_by !== 'SYSTEM') {
+      const depositAmt = parseFloat(user.deposit_amount) || 0;
+      const l1 = depositAmt * COMM_L1;
+      const l2 = depositAmt * COMM_L2;
+
+      // Level 1 commission
+      await withDb(async (c) => {
+        await c.query('UPDATE users SET balance=COALESCE(balance,0)+$1, total_commission=COALESCE(total_commission,0)+$1 WHERE username=$2', [l1, user.referred_by]);
+      });
+
+      // Level 2 commission
+      const l1User = await withDb(async (c) => {
+        const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [user.referred_by]);
+        return rows[0];
+      });
+      if (l1User && l1User.referred_by && l1User.referred_by !== 'SYSTEM') {
+        await withDb(async (c) => {
+          await c.query('UPDATE users SET balance=COALESCE(balance,0)+$1, total_commission=COALESCE(total_commission,0)+$1 WHERE username=$2', [l2, l1User.referred_by]);
+        });
+      }
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.error('[ACTIVATE_TIER]', e.message);
+    return { error: e.message };
+  }
+}
+
 async function adminApproveDeposit(depositId) {
   const deps = await withDb(async (c) => {
     const { rows } = await c.query('SELECT * FROM deposits WHERE id=$1', [depositId]);
@@ -925,29 +974,31 @@ async function adminApproveDeposit(depositId) {
   });
 
   if (!existingTierDeposit) {
-    // First deposit for this tier - check 3 referrals
+    // First deposit for this tier - DO NOT activate yet, wait for 3 referrals
     const refCheck = await checkTierReferrals(user.username, tierKey);
     const isRootUser = user.referred_by === 'SYSTEM' || !user.referred_by;
+
+    // Add deposit amount to balance (available for withdrawal later)
+    await withDb(async (c) => {
+      await c.query('UPDATE users SET deposit_amount=COALESCE(deposit_amount,0)+$1, total_balance=COALESCE(total_balance,0)+$1 WHERE username=$2', [parseFloat(deposit.amount), user.username]);
+      // Create tier cycle in paused state (no cycle_start = not yet active)
+      await c.query(
+        'INSERT INTO user_tier_cycles (username, tier, cycle_start, cycle_week, total_withdrawn, weekly_withdrawn, week_start) VALUES ($1,$2,0,0,0,0,0) ON CONFLICT (username, tier)',
+        [user.username, tierKey]
+      );
+    });
+
     if (!isRootUser && refCheck.count < 3) {
-      return { error: `User needs 3 approved downline for ${tierKey} tier. Have: ${refCheck.count}/3. Deposit saved but tier not activated.` };
+      return { partial: true, message: `Deposit saved. Tier ${tierKey} will activate after 3 approved referrals. Current: ${refCheck.count}/3.` };
     }
 
-    // Activate tier for user
-    const nowMs = Date.now();
-    await withDb(async (c) => {
-      await c.query('UPDATE users SET active_plan=$1, deposit_amount=deposit_amount+$2, total_balance=total_balance+$2 WHERE username=$3', [tierKey, parseFloat(deposit.amount), user.username]);
-      // Create or update tier cycle
-      await c.query(
-        'INSERT INTO user_tier_cycles (username, tier, cycle_start, cycle_week, total_withdrawn, weekly_withdrawn, week_start) VALUES ($1,$2,$3,1,0,0,$3) ON CONFLICT (username, tier) DO UPDATE SET cycle_start=$3, cycle_week=1',
-        [user.username, tierKey, nowMs]
-      );
-      // Activate referrals for this tier
-      await c.query('UPDATE user_tier_referrals SET is_active=TRUE WHERE referred_username=$1 AND tier=$2', [user.username, tierKey]);
-    });
+    // Has 3 referrals or is root - activate tier
+    const activateResult = await activateUserTier(user.username, tierKey);
+    if (!activateResult.success) return { error: activateResult.error };
   } else {
     // Additional deposit for existing tier - just add to balance
     await withDb(async (c) => {
-      await c.query('UPDATE users SET deposit_amount=deposit_amount+$1, total_balance=total_balance+$1 WHERE username=$2', [parseFloat(deposit.amount), user.username]);
+      await c.query('UPDATE users SET deposit_amount=COALESCE(deposit_amount,0)+$1, total_balance=COALESCE(total_balance,0)+$1 WHERE username=$2', [parseFloat(deposit.amount), user.username]);
     });
   }
 
@@ -956,33 +1007,6 @@ async function adminApproveDeposit(depositId) {
     await c.query('UPDATE deposits SET status=$1, approved_at=NOW() WHERE id=$2', ['approved', depositId]);
     await c.query('UPDATE user_tier_deposits SET status=$1, approved_at=NOW() WHERE deposit_id=$2', ['approved', depositId]);
   });
-
-  // Commissions
-  if (user.referred_by && user.referred_by !== 'SYSTEM') {
-    const l1s = await withDb(async (c) => {
-      const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [user.referred_by]);
-      return rows;
-    });
-    if (l1s && l1s.length > 0) {
-      const l1 = l1s[0];
-      const c1 = parseFloat(deposit.amount) * COMM_L1;
-      await withDb(async (c) => {
-        await c.query('UPDATE users SET balance=COALESCE(balance,0)+$1, total_commission=COALESCE(total_commission,0)+$1 WHERE username=$2', [c1, l1.username]);
-      });
-      if (l1.referred_by && l1.referred_by !== 'SYSTEM') {
-        const l2s = await withDb(async (c) => {
-          const { rows } = await c.query('SELECT * FROM users WHERE username=$1', [l1.referred_by]);
-          return rows;
-        });
-        if (l2s && l2s.length > 0) {
-          const c2 = parseFloat(deposit.amount) * COMM_L2;
-          await withDb(async (c) => {
-            await c.query('UPDATE users SET balance=COALESCE(balance,0)+$1, total_commission=COALESCE(total_commission,0)+$1 WHERE username=$2', [c2, l2s[0].username]);
-          });
-        }
-      }
-    }
-  }
 
   return { success: true, deposit };
 }
