@@ -420,7 +420,19 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
 
     const isRoot = ROOT_REFERRAL_CODES.includes(referralCode.toUpperCase());
     let referrerUsername = 'SYSTEM';
-    if (!isRoot) {
+    if (isRoot) {
+      // BOOT00 = first user, register under them directly
+      referrerUsername = 'BOOT';
+      const allTiers = Object.keys(TIERS);
+      for (const tier of allTiers) {
+        await withDb(async (c) => {
+          await c.query(
+            'INSERT INTO user_tier_referrals (username, referred_username, tier, is_active) VALUES ($1,$2,$3,FALSE) ON CONFLICT DO NOTHING',
+            [referrerUsername, username, tier]
+          );
+        });
+      }
+    } else {
       const ref = await withDb(async (c) => {
         const { rows } = await c.query('SELECT username FROM users WHERE referral_code=$1', [referralCode]);
         return rows[0];
