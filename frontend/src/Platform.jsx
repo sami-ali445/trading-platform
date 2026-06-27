@@ -742,7 +742,7 @@ function Register({ onNav }) {
     <input style={s.inp} type="password" placeholder="تأكيد كلمة المرور" value={cp} onChange={e => setCp(e.target.value)} />
     <input style={{ ...s.inp, borderColor: ref ? 'var(--accent)' : 'var(--border)' }} placeholder="🔗 كود الإحالة (مطلوب)" value={ref} onChange={e => setRef(e.target.value.toUpperCase())} />
     {ref && <p style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 10 }}>✅ تم تطبيق كود الإحالة تلقائياً من رابط الدعوة</p>}
-    {!ref && <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>كود الإحالة مطلوب — اطلبه من الشخص الذي دعاك</p>}
+    {!ref && <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>كود الإحالة مطلوب — اطلبه من الشخص الذي دعاك. وإذا أول مرة ما عندك كود استخدم: <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>BOOT00</span></p>}
     <button style={s.btn('#28a745')} onClick={go} disabled={load}>{load ? '⏳...' : '📝 إنشاء الحساب'}</button>
   </FormCard>;
 }
