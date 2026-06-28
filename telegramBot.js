@@ -9,7 +9,7 @@
  * - Admin replies from web panel OR from Telegram -> bot forwards to user
  */
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:***';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8795808560:AAEKW3jOkZPNFSlEJmNi1CW0Jmk3u_i8Rm4';
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '8916948567';
 
 // Secret token for webhook verification - MUST match what we send to Telegram via setWebhook
