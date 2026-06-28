@@ -48,6 +48,10 @@ async function setWebhook(url) {
   return tgSend('setWebhook', { url, secret_token: WEBHOOK_SECRET_TOKEN });
 }
 
+async function getWebhookInfo() {
+  return tgSend('getWebhookInfo', {});
+}
+
 async function processUpdate(update) {
   if (update.message) {
     await handleMessage(update.message);
@@ -581,5 +585,7 @@ module.exports = {
   registerTicket,
   activeTickets,
   getLastAdminMessage,
-  getAllChatIds
+  getAllChatIds,
+  setWebhook,
+  getWebhookInfo
 };

@@ -1327,6 +1327,26 @@ try {
     const ids = getAllChatIds();
     res.json({ success: true, chatIds: ids, count: ids.length });
   });
+
+  // Endpoint: re-set webhook (uses server-side token)
+  app.post('/api/telegram/set-webhook', async (req, res) => {
+    const { setWebhook } = require('./telegramBot');
+    const renderUrl = process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com';
+    const webhookUrl = renderUrl.replace(/\/$/, '') + '/webhook/telegram';
+    const result = await setWebhook(webhookUrl);
+    res.json({ success: true, result, url: webhookUrl });
+  });
+
+  // Endpoint: get webhook info via Telegram API
+  app.get('/api/telegram/webhook-info', async (req, res) => {
+    const { getWebhookInfo } = require('./telegramBot');
+    try {
+      const info = await getWebhookInfo();
+      res.json({ success: true, info });
+    } catch (e) {
+      res.json({ success: false, error: e.message });
+    }
+  });
   
   console.log('[TELEGRAM] Support bot enabled');
 } catch (e) {
