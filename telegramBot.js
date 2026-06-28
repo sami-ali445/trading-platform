@@ -166,6 +166,9 @@ function getApiUrl() {
 // ============ MESSAGE HANDLERS ============
 const activeTickets = new Map();
 
+// Track admin's last replied ticket (for web-based tickets without telegram_chat_id)
+let adminLastTicket = {};
+
 // Register a ticket for Telegram reply routing (called from supportRoutes.js)
 function registerTicket(ticketId, telegramChatId) {
   if (ticketId && telegramChatId) {
@@ -245,19 +248,59 @@ async function handleAdminMessage(msg) {
     }
   }
 
-  // Priority 3: latest open ticket from DB
-  if (!targetTicketId) {
+  // Priority 2.5: admin's last replied ticket (for web tickets without telegram)
+  if (!targetTicketId && adminLastTicket[chatId]) {
+    // Check if the last ticket is still open
     try {
-      const apiUrl = getApiUrl();
-      const resp = await fetch(apiUrl + '/api/telegram/open-tickets');
-      const data = await resp.json();
-      if (data.success && data.tickets && data.tickets.length > 0) {
-        const t = data.tickets[0];
-        targetTicketId = t.ticket_id;
-        console.log('[BOT] Using ticketId from DB:', targetTicketId);
+      const tgDb = require('./telegramBotDb');
+      if (tgDb.getTicket) {
+        const lastTicket = await tgDb.getTicket(adminLastTicket[chatId]);
+        if (lastTicket && lastTicket.status === 'open') {
+          targetTicketId = lastTicket.ticket_id;
+          console.log('[BOT] Using admin last replied ticket:', targetTicketId);
+        }
       }
     } catch (e) {
-      console.error('[BOT] DB search failed:', e.message);
+      console.warn('[BOT] adminLastTicket check failed:', e.message);
+    }
+  }
+
+  // Priority 3: latest open ticket from DB (direct DB call to avoid HTTP self-call crash)
+  if (!targetTicketId) {
+    console.log('[BOT] Priority 3: Searching DB for open tickets...');
+    try {
+      let dbResult = null;
+      try {
+        const tgDb = require('./telegramBotDb');
+        if (tgDb && tgDb.getOpenTickets) {
+          dbResult = await tgDb.getOpenTickets(10);
+          console.log('[BOT] Priority 3: DB result:', JSON.stringify(dbResult));
+        } else {
+          console.warn('[BOT] Priority 3: tgDb.getOpenTickets not available');
+        }
+      } catch (serverErr) {
+        console.warn('[BOT] Priority 3: DB module error:', serverErr.message);
+      }
+
+      if (!dbResult) {
+        // Fallback to HTTP
+        console.log('[BOT] Priority 3: Trying HTTP fallback...');
+        const apiUrl = getApiUrl();
+        const resp = await fetch(apiUrl + '/api/telegram/open-tickets');
+        dbResult = await resp.json();
+        console.log('[BOT] Priority 3: HTTP result:', JSON.stringify(dbResult));
+      }
+
+      if (dbResult && dbResult.success && dbResult.tickets && dbResult.tickets.length > 0) {
+        // Get the first open ticket (oldest created)
+        let t = dbResult.tickets[0];
+        targetTicketId = t.ticket_id;
+        console.log('[BOT] Priority 3: FOUND ticketId:', targetTicketId, 'for user:', t.username);
+      } else {
+        console.log('[BOT] Priority 3: NO open tickets found');
+      }
+    } catch (e) {
+      console.error('[BOT] Priority 3: DB search failed:', e.message);
     }
   }
 
@@ -267,20 +310,41 @@ async function handleAdminMessage(msg) {
     console.log('[BOT] Reply text (msg.text):', text);
 
     try {
-      const apiUrl = getApiUrl();
-      const payload = { ticketId: targetTicketId, sender: 'admin', message: text };
-      console.log('[BOT] POST payload:', JSON.stringify(payload));
+      // Use direct DB call to avoid HTTP self-call issues that cause server crashes
+      let saveData = null;
+      try {
+        const tgDb = require('./telegramBotDb');
+        if (tgDb && tgDb.saveMessage) {
+          saveData = await tgDb.saveMessage(targetTicketId, 'admin', text);
+          console.log('[BOT] Save result (direct):', JSON.stringify(saveData));
+        } else {
+          console.warn('[BOT] tgDb.saveMessage not available');
+        }
+      } catch (serverErr) {
+        console.warn('[BOT] DB module error, will try HTTP:', serverErr.message);
+      }
 
-      const saveResp = await fetch(apiUrl + '/api/support/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const saveData = await saveResp.json();
-      console.log('[BOT] Save result:', JSON.stringify(saveData));
+      // If direct DB save failed or not available, try HTTP fallback
+      if (!saveData || !saveData.success) {
+        console.log('[BOT] Trying HTTP fallback...');
+        const apiUrl = getApiUrl();
+        const payload = { ticketId: targetTicketId, sender: 'admin', message: text };
+        console.log('[BOT] POST payload:', JSON.stringify(payload));
+        const saveResp = await fetch(apiUrl + '/api/support/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        saveData = await saveResp.json();
+        console.log('[BOT] Save result (HTTP):', JSON.stringify(saveData));
+      }
 
-      if (saveData.success) {
+      if (saveData && saveData.success) {
         console.log('[BOT] Admin reply SAVED to DB successfully!');
+        
+        // Track which ticket this admin replied to (for future replies without reply_to_message)
+        adminLastTicket[chatId] = targetTicketId;
+        console.log('[BOT] Updated adminLastTicket for chat:', chatId, '->', targetTicketId);
         
         // Forward reply to the original user via Telegram (if they have telegram linked)
         try {
@@ -362,12 +426,27 @@ async function handleUserMessage(msg) {
       try { await sendMessage(ADMIN_TELEGRAM_ID, forwardMsg); } catch (e) {}
     }
     try {
-      const apiUrl = getApiUrl();
-      await fetch(`${apiUrl}/api/support/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketId, sender: 'user', message: text })
-      });
+      // Use direct DB call to avoid HTTP self-call issues that cause server crashes
+      let msgSaved = false;
+      try {
+        const tgDb = require('./telegramBotDb');
+        if (tgDb.saveMessage) {
+          const result = await tgDb.saveMessage(ticketId, 'user', text);
+          msgSaved = result?.success;
+          console.log('[BOT] User message saved (direct):', JSON.stringify(result));
+        }
+      } catch (serverErr) {
+        console.warn('[BOT] DB module not available for user msg, falling back to HTTP:', serverErr.message);
+      }
+
+      if (!msgSaved) {
+        const apiUrl = getApiUrl();
+        await fetch(`${apiUrl}/api/support/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticketId, sender: 'user', message: text })
+        });
+      }
     } catch (e) {}
     return sendMessage(chatId, `✅ تم استلام رسالتك! فريق الدعم سيرد عليك قريباً...`);
   }
@@ -522,17 +601,12 @@ function verifyTelegramSignature(req) {
 
 // ============ WEBHOOK SETUP ============
 function setupWebhook(app, webhookPath = '/webhook/telegram') {
-  // Set webhook URL FIRST (before route registration for immediate availability)
+  // Build full URL from environment (RENDER_EXTERNAL_URL is set by Render automatically)
   var renderUrl = process.env.RENDER_EXTERNAL_URL;
-  var webhookUrl = process.env.TELEGRAM_WEBHOOK_URL
+  var baseUrl = process.env.TELEGRAM_WEBHOOK_URL
     || (renderUrl ? renderUrl.replace(/\/$/, '') : null)
     || 'https://trading-platform-iglr.onrender.com';
-
-  setWebhook(webhookPath).then(function() {
-    console.log('[TELEGRAM] Webhook set to:', webhookUrl + webhookPath);
-  }).catch(function(e) {
-    console.error('[TELEGRAM] Webhook setup failed:', e.message);
-  });
+  var fullUrl = baseUrl + webhookPath;
 
   // Webhook route with signature verification
   app.post(webhookPath, (req, res) => {
@@ -555,7 +629,32 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
   });
 
   console.log('[TELEGRAM] Bot initialized with signature verification. Admin ID:', ADMIN_TELEGRAM_ID);
-  console.log('[TELEGRAM] Webhook URL:', webhookUrl + webhookPath);
+  console.log('[TELEGRAM] Webhook URL:', fullUrl);
+  
+  // Set webhook on startup with retry logic
+  // Use setTimeout to ensure server is fully listening before calling Telegram API
+  setTimeout(async () => {
+    const maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[WEBHOOK] Setting webhook (attempt ${attempt}/${maxRetries})...`);
+        console.log(`[WEBHOOK] Target URL: ${fullUrl}`);
+        const result = await setWebhook(fullUrl);
+        if (result.ok) {
+          console.log('[WEBHOOK] ✓ Webhook set successfully to:', fullUrl);
+          return;
+        } else {
+          console.error('[WEBHOOK] setWebhook returned error:', result.description || JSON.stringify(result));
+        }
+      } catch (e) {
+        console.error(`[WEBHOOK] setWebhook attempt ${attempt} failed:`, e.message);
+      }
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 3000 * attempt)); // 3s, 6s, 9s, 12s
+      }
+    }
+    console.error('[WEBHOOK] ✗ Failed to set webhook after all retries');
+  }, 5000); // wait 5 seconds for server to fully start and bind to port
 }
 
 // ============ EXPORTS ============

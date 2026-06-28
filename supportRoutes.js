@@ -107,10 +107,24 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
   app.get('/api/user/support/ticket', authenticateToken, async (req, res) => {
     try {
       const username = req.user.username;
+      const ticketIdFilter = req.query.ticketId;
       
       // Get user's telegram_id and find ticket in one query (optimized)
       const result = await withDb(async (c) => {
-        // First try to find ticket by username OR by telegram_id linked to this user
+        // If specific ticketId requested, use it for exact match
+        if (ticketIdFilter) {
+          const { rows } = await c.query(
+            `SELECT t.* FROM support_tickets t 
+             WHERE t.ticket_id = $1 AND (
+               t.username = $2 
+               OR t.telegram_chat_id = (SELECT telegram_id FROM users WHERE username = $2 LIMIT 1)
+             )
+             ORDER BY t.updated_at DESC LIMIT 1`,
+            [ticketIdFilter, username]
+          );
+          return rows[0];
+        }
+        // Otherwise find any open ticket for this user
         const { rows } = await c.query(
           `SELECT t.* FROM support_tickets t 
            WHERE t.status = 'open' AND (

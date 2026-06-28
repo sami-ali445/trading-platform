@@ -18,7 +18,11 @@ function SupportChat({ user, API }) {
   const loadTicket = async () => {
     if (!API) return;
     try {
-      const { data } = await API.get('/user/support/ticket');
+      // If we already have a ticketId, use it for precise matching
+      const url = ticketIdRef.current 
+        ? `/user/support/ticket?ticketId=${encodeURIComponent(ticketIdRef.current)}`
+        : '/user/support/ticket';
+      const { data } = await API.get(url);
       if (data.success && data.ticket) {
         ticketIdRef.current = data.ticket.ticket_id;
         setMessages(data.messages || []);

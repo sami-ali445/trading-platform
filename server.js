@@ -231,6 +231,10 @@ async function withDb(fn) {
   finally { client.release(); }
 }
 
+// Register withDb with shared telegram Bot DB module
+const tgBotDb = require('./telegramBotDb');
+tgBotDb.setWithDb(withDb);
+
 // ============ TIER ISOLATION HELPERS ============
 
 // Get user's active tiers (tiers with approved deposits)
@@ -519,7 +523,6 @@ app.post('/api/auth/logout', authenticateToken, (req, res) => {
   clearTokenCookie(res); res.json({ success: true, message: 'Logged out.' });
 });
 
-// ============ TELEGRAM LINKING ============
 app.post('/api/user/telegram/link', authenticateToken, async (req, res) => {
   try {
     const { telegramId, telegramUsername } = req.body;
@@ -1309,7 +1312,7 @@ app.get('/api/telegram/open-tickets', async (req, res) => {
 
 // Setup Telegram webhook (always enable)
 try {
-  const { setupWebhook, getLastAdminMessage } = require('./telegramBot');
+  const { setupWebhook, getLastAdminMessage, setWebhook: botSetWebhook } = require('./telegramBot');
   setupWebhook(app, '/webhook/telegram');
   
   // Debug endpoint: get last admin message info (for setup purposes)
@@ -1328,13 +1331,29 @@ try {
     res.json({ success: true, chatIds: ids, count: ids.length });
   });
 
+  // Health check endpoint that also sets webhook
+  app.get('/api/telegram/health', async (req, res) => {
+    try {
+      const renderUrl = process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com';
+      const webhookUrl = renderUrl.replace(/\/$/, '') + '/webhook/telegram';
+      const result = await botSetWebhook(webhookUrl);
+      res.json({ success: true, webhook: result.ok, url: webhookUrl });
+    } catch (e) {
+      res.json({ success: false, error: e.message });
+    }
+  });
+
   // Endpoint: re-set webhook (uses server-side token)
   app.post('/api/telegram/set-webhook', async (req, res) => {
     const { setWebhook } = require('./telegramBot');
     const renderUrl = process.env.RENDER_EXTERNAL_URL || 'https://trading-platform-iglr.onrender.com';
     const webhookUrl = renderUrl.replace(/\/$/, '') + '/webhook/telegram';
-    const result = await setWebhook(webhookUrl);
-    res.json({ success: true, result, url: webhookUrl });
+    try {
+      const result = await setWebhook(webhookUrl);
+      res.json({ success: !!result.ok, result, url: webhookUrl });
+    } catch (e) {
+      res.json({ success: false, error: e.message, url: webhookUrl });
+    }
   });
 
   // Endpoint: get webhook info via Telegram API
