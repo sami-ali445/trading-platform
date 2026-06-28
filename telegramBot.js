@@ -396,10 +396,13 @@ async function handleMessage(msg) {
     console.log('[BOT] reply_to_message.text:', (msg.reply_to_message.text || '').substring(0, 100));
   }
 
+  // TEMP DEBUG: Log ALL incoming messages for setup
+  console.log('[DEBUG] Incoming from chatId:', String(chatId), 'text:', text.substring(0, 50));
+  recordAdminMessage(chatId, text); // Store ALL messages for debug
+
   // CRITICAL: Admin check — if chatId matches admin, ALWAYS treat as admin
   if (isAdmin(chatId)) {
     console.log('[BOT] -> Routing to handleAdminMessage');
-    recordAdminMessage(chatId, text); // Store for debug endpoint
     await handleAdminMessage(msg);
   } else {
     console.log('[BOT] -> Routing to handleUserMessage');
@@ -527,7 +530,7 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
     console.error('[TELEGRAM] Webhook setup failed:', e.message);
   });
 
-  // Webhook route with signature verification
+  // TEMP DEBUG: Signature verification DISABLED for admin ID capture
   app.post(webhookPath, (req, res) => {
     const incomingToken = req.headers['x-telegram-bot-api-secret-token'];
     
@@ -539,14 +542,13 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
       console.log('[WEBHOOK] Token match:', incomingToken === WEBHOOK_SECRET_TOKEN);
     }
     
-    // Verify Telegram signature
-    if (!verifyTelegramSignature(req)) {
-      console.warn('[WEBHOOK] REJECTED: invalid signature from', req.ip);
-      console.warn('[WEBHOOK] Incoming token:', incomingToken ? incomingToken.substring(0, 20) + '...' : 'null');
-      return res.status(403).send('Forbidden');
-    }
+    // TEMPORARILY DISABLED — re-enable after capturing admin ID
+    // if (!verifyTelegramSignature(req)) {
+    //   console.warn('[WEBHOOK] REJECTED: invalid signature from', req.ip);
+    //   return res.status(403).send('Forbidden');
+    // }
     
-    console.log('[WEBHOOK] ACCEPTED valid update:', JSON.stringify(req.body).substring(0, 300));
+    console.log('[WEBHOOK] ACCEPTED (no verification):', JSON.stringify(req.body).substring(0, 500));
     processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
     
     // Respond immediately to avoid Telegram retries
