@@ -15,15 +15,6 @@ function SupportChat({ user, API }) {
   const messagesEndRef = useRef(null);
   const ticketIdRef = useRef(null);
 
-  // Load existing ticket messages
-  useEffect(() => {
-    if (!API) return;
-    loadTicket();
-    // Auto-refresh every 5 seconds to show new admin replies
-    const interval = setInterval(loadTicket, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
   const loadTicket = async () => {
     if (!API) return;
     try {
@@ -32,9 +23,25 @@ function SupportChat({ user, API }) {
         ticketIdRef.current = data.ticket.ticket_id;
         setMessages(data.messages || []);
         setTicketStatus(data.ticket.status);
+      } else if (data.success && !data.ticket) {
+        // No ticket exists yet — clear state for fresh chat
+        if (!ticketIdRef.current) {
+          setMessages([]);
+          setTicketStatus(null);
+        }
       }
     } catch (e) { console.error(e); }
   };
+
+  // Load existing ticket messages + auto-refresh
+  useEffect(() => {
+    if (!API) return;
+    // Load immediately
+    loadTicket();
+    // Auto-refresh every 3 seconds for live message updates
+    const interval = setInterval(loadTicket, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const sendMessage = async () => {
     if (!newMessage.trim() || loading) return;

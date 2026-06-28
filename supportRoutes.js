@@ -106,13 +106,31 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
   // Get user's active ticket
   app.get('/api/user/support/ticket', authenticateToken, async (req, res) => {
     try {
-      const ticket = await withDb(async (c) => {
+      // Get user's telegram_id for cross-referencing
+      const userInfo = await withDb(async (c) => {
         const { rows } = await c.query(
-          `SELECT * FROM support_tickets 
-           WHERE username = $1 AND status = 'open' 
-           ORDER BY created_at DESC LIMIT 1`,
+          'SELECT telegram_id FROM users WHERE username = $1',
           [req.user.username]
         );
+        return rows[0];
+      });
+      const userTelegramId = userInfo?.telegram_id || null;
+
+      // Find ticket by username OR by telegram_id (for Telegram-originated tickets)
+      const ticket = await withDb(async (c) => {
+        let query = `SELECT * FROM support_tickets WHERE status = 'open' AND `;
+        const params = [];
+        
+        if (userTelegramId) {
+          query += `(username = $1 OR telegram_chat_id = $2)`;
+          params.push(req.user.username, userTelegramId);
+        } else {
+          query += `username = $1`;
+          params.push(req.user.username);
+        }
+        
+        query += ` ORDER BY updated_at DESC LIMIT 1`;
+        const { rows } = await c.query(query, params);
         return rows[0];
       });
 
