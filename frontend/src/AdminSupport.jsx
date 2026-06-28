@@ -37,7 +37,17 @@ function AdminSupportPanel({ user }) {
     } catch (e) { console.error(e); }
   }, []);
 
-  useEffect(() => { loadTickets(); loadStats(); }, [loadTickets, loadStats]);
+  useEffect(() => {
+    loadTickets();
+    loadStats();
+    // Auto-refresh every 5 seconds for new messages
+    const interval = setInterval(() => {
+      loadTickets();
+      loadStats();
+      if (selectedTicket) loadTicketDetail(selectedTicket.ticket_id);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [loadTickets, loadStats]);
 
   const loadTicketDetail = async (ticketId) => {
     try {

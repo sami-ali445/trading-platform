@@ -19,6 +19,9 @@ function SupportChat({ user, API }) {
   useEffect(() => {
     if (!API) return;
     loadTicket();
+    // Auto-refresh every 5 seconds to show new admin replies
+    const interval = setInterval(loadTicket, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadTicket = async () => {
