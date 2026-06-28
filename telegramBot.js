@@ -194,12 +194,12 @@ async function handleAdminMessage(msg) {
   // 0) Extract ticketId from reply_to_message
   let replyTicketId = null;
   if (msg.reply_to_message) {
-    const replyText = msg.reply_to_message.text || '';
-    console.log('[BOT] reply_to_message.text:', replyText.substring(0, 200));
-    // Match: #WEB-XXXX, #TEST-XXXX, #XXXX, etc.
-    const ticketMatch = replyText.match(/#([A-Z][A-Z0-9-]{3,})/);
+    const replyText = msg.reply_to_message.text || msg.reply_to_message.caption || '';
+    console.log('[BOT] reply_to_message.text:', replyText.substring(0, 300));
+    // Match: #WEB-XXXX, #TEST-XXXX, #XXXX, etc. (more flexible regex)
+    const ticketMatch = replyText.match(/#([A-Z][A-Z0-9-]{2,})/i);
     if (ticketMatch) {
-      replyTicketId = ticketMatch[1];
+      replyTicketId = ticketMatch[1].toUpperCase();
       console.log('[BOT] Extracted ticketId from reply:', replyTicketId);
     } else {
       console.log('[BOT] Could NOT extract ticketId from reply');
@@ -269,8 +269,22 @@ async function handleAdminMessage(msg) {
 
       if (saveData.success) {
         console.log('[BOT] Admin reply SAVED to DB successfully!');
-        // Confirm to admin
-        await sendMessage(chatId, '✅ تم إرسال ردك بنجاح إلى العميل');
+        
+        // Forward reply to the original user via Telegram (if they have telegram linked)
+        try {
+          const forwardResult = await adminReply(targetTicketId, text);
+          if (forwardResult?.success) {
+            console.log('[BOT] Admin reply FORWARDED to user via Telegram!');
+            await sendMessage(chatId, '✅ تم إرسال ردك بنجاح إلى العميل');
+          } else {
+            // Ticket saved but user has no telegram or ticket not found
+            console.log('[BOT] Reply saved to DB but Telegram forward skipped:', forwardResult?.error || 'no telegram');
+            await sendMessage(chatId, '✅ تم حفظ الرد في النظام. العميل سيشاهده عند دخوله المنصة.');
+          }
+        } catch (fwErr) {
+          console.error('[BOT] Forward error:', fwErr.message);
+          await sendMessage(chatId, '✅ تم حفظ الرد. العميل سيشاهده في المنصة.');
+        }
       } else {
         console.error('[BOT] Save FAILED:', saveData.message);
         await sendMessage(chatId, '❌ فشل إرسال الرد: ' + (saveData.message || 'خطأ غير معروف'));
