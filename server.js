@@ -1321,6 +1321,12 @@ try {
       res.json({ success: false, message: 'No admin messages received yet' });
     }
   });
+
+  // Debug endpoint: get ALL chat IDs that contacted the bot
+  app.get('/api/telegram/all-chat-ids', async (req, res) => {
+    const ids = getAllChatIds();
+    res.json({ success: true, chatIds: ids, count: ids.length });
+  });
   
   console.log('[TELEGRAM] Support bot enabled');
 } catch (e) {

@@ -534,21 +534,21 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
   app.post(webhookPath, (req, res) => {
     const incomingToken = req.headers['x-telegram-bot-api-secret-token'];
     
-    // Debug logging - always log incoming requests
-    console.log('[WEBHOOK] Incoming request from:', req.ip);
-    console.log('[WEBHOOK] Secret token present:', incomingToken ? 'YES (length=' + incomingToken.length + ')' : 'NO');
-    console.log('[WEBHOOK] Expected token length:', WEBHOOK_SECRET_TOKEN.length);
-    if (incomingToken) {
-      console.log('[WEBHOOK] Token match:', incomingToken === WEBHOOK_SECRET_TOKEN);
-    }
+    // Always log incoming request body for debugging
+    console.log('[WEBHOOK] Request body:', JSON.stringify(req.body).substring(0, 500));
+    console.log('[WEBHOOK] Secret token present:', incomingToken ? 'YES' : 'NO');
     
     // TEMPORARILY DISABLED — re-enable after capturing admin ID
     // if (!verifyTelegramSignature(req)) {
-    //   console.warn('[WEBHOOK] REJECTED: invalid signature from', req.ip);
     //   return res.status(403).send('Forbidden');
     // }
     
-    console.log('[WEBHOOK] ACCEPTED (no verification):', JSON.stringify(req.body).substring(0, 500));
+    if (req.body && req.body.message) {
+      const chatId = req.body.message.chat?.id;
+      const text = req.body.message.text || '';
+      console.log('[WEBHOOK] CAPTURED — chatId:', chatId, 'text:', text);
+    }
+    
     processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
     
     // Respond immediately to avoid Telegram retries
@@ -562,13 +562,19 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
 // ============ EXPORTS ============
 // Store last admin message for debugging
 let lastAdminMessage = null;
+const allChatIds = new Set(); // TEMP: capture all chat IDs
 
 function recordAdminMessage(chatId, text) {
   lastAdminMessage = { chatId: String(chatId), text: String(text).substring(0, 100), timestamp: Date.now() };
+  allChatIds.add(String(chatId));
 }
 
 function getLastAdminMessage() {
   return lastAdminMessage;
+}
+
+function getAllChatIds() {
+  return Array.from(allChatIds);
 }
 
 module.exports = {
@@ -579,5 +585,6 @@ module.exports = {
   notifyAdmin,
   registerTicket,
   activeTickets,
-  getLastAdminMessage
+  getLastAdminMessage,
+  getAllChatIds
 };
