@@ -106,47 +106,36 @@ function setupSupportRoutes(app, withDb, authenticateToken, requireAdmin) {
   // Get user's active ticket
   app.get('/api/user/support/ticket', authenticateToken, async (req, res) => {
     try {
-      // Get user's telegram_id for cross-referencing
-      const userInfo = await withDb(async (c) => {
+      const username = req.user.username;
+      
+      // Get user's telegram_id and find ticket in one query (optimized)
+      const result = await withDb(async (c) => {
+        // First try to find ticket by username OR by telegram_id linked to this user
         const { rows } = await c.query(
-          'SELECT telegram_id FROM users WHERE username = $1',
-          [req.user.username]
+          `SELECT t.* FROM support_tickets t 
+           WHERE t.status = 'open' AND (
+             t.username = $1 
+             OR t.telegram_chat_id = (SELECT telegram_id FROM users WHERE username = $1 LIMIT 1)
+           )
+           ORDER BY t.updated_at DESC LIMIT 1`,
+          [username]
         );
         return rows[0];
       });
-      const userTelegramId = userInfo?.telegram_id || null;
 
-      // Find ticket by username OR by telegram_id (for Telegram-originated tickets)
-      const ticket = await withDb(async (c) => {
-        let query = `SELECT * FROM support_tickets WHERE status = 'open' AND `;
-        const params = [];
-        
-        if (userTelegramId) {
-          query += `(username = $1 OR telegram_chat_id = $2)`;
-          params.push(req.user.username, userTelegramId);
-        } else {
-          query += `username = $1`;
-          params.push(req.user.username);
-        }
-        
-        query += ` ORDER BY updated_at DESC LIMIT 1`;
-        const { rows } = await c.query(query, params);
-        return rows[0];
-      });
-
-      if (!ticket) {
+      if (!result) {
         return res.json({ success: true, ticket: null, messages: [] });
       }
 
       const messages = await withDb(async (c) => {
         const { rows } = await c.query(
-          'SELECT * FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
-          [ticket.ticket_id]
+          'SELECT sender, message, created_at FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+          [result.ticket_id]
         );
         return rows;
       });
 
-      res.json({ success: true, ticket, messages: messages || [] });
+      res.json({ success: true, ticket: result, messages: messages || [] });
     } catch (err) {
       console.error('[SUPPORT] Get user ticket:', err.message);
       res.status(500).json({ success: false, message: 'Server error' });

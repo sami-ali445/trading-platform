@@ -38,8 +38,8 @@ function SupportChat({ user, API }) {
     if (!API) return;
     // Load immediately
     loadTicket();
-    // Auto-refresh every 3 seconds for live message updates
-    const interval = setInterval(loadTicket, 3000);
+    // Auto-refresh every 8 seconds for live message updates (balanced performance)
+    const interval = setInterval(loadTicket, 8000);
     return () => clearInterval(interval);
   }, []);
 
