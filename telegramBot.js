@@ -9,8 +9,12 @@
  * - Admin replies from web panel OR from Telegram -> bot forwards to user
  */
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:AAFTfDRE9qQeCgtGPEZEZCGO30Rrb5JD1zc';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8973004890:***';
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '8916948567';
+
+// Secret token for webhook verification - MUST match what we send to Telegram via setWebhook
+// Telegram sends this back in x-telegram-bot-api-secret-token header
+const WEBHOOK_SECRET_TOKEN = process.env.TELEGRAM_SECRET_TOKEN || 'tp_webhook_secret_2025_secure_random_token_xyz123';
 
 if (!BOT_TOKEN) {
   console.error('[TELEGRAM] FATAL: TELEGRAM_BOT_TOKEN not set!');
@@ -33,9 +37,7 @@ async function sendMessage(chatId, text, opts = {}) {
 }
 
 async function setWebhook(url) {
-  const secretHash = crypto.createHash('sha256').update(BOT_TOKEN).digest();
-  const secretToken = crypto.createHmac('sha256', secretHash).update(BOT_TOKEN).digest('hex');
-  return tgSend('setWebhook', { url, secret_token: secretToken });
+  return tgSend('setWebhook', { url, secret_token: WEBHOOK_SECRET_TOKEN });
 }
 
 async function processUpdate(update) {
@@ -459,24 +461,23 @@ const crypto = require('crypto');
 
 function verifyTelegramSignature(req) {
   try {
-    const secretHash = crypto.createHash('sha256')
-      .update(BOT_TOKEN)
-      .digest();
-    
     const headerToken = req.headers['x-telegram-bot-api-secret-token'];
-    const expectedSecret = crypto.createHmac('sha256', secretHash)
-      .update(BOT_TOKEN)
-      .digest('hex');
     
     if (!headerToken) {
       console.warn('[WEBHOOK] No secret token header received');
       return false;
     }
     
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(headerToken, 'hex'),
-      Buffer.from(expectedSecret, 'hex')
-    );
+    // Direct string comparison using timing-safe equal
+    const headerBuf = Buffer.from(headerToken);
+    const expectedBuf = Buffer.from(WEBHOOK_SECRET_TOKEN);
+    
+    if (headerBuf.length !== expectedBuf.length) {
+      console.warn('[WEBHOOK] Secret token length mismatch');
+      return false;
+    }
+    
+    const isValid = crypto.timingSafeEqual(headerBuf, expectedBuf);
     
     if (!isValid) {
       console.warn('[WEBHOOK] Invalid secret token');
