@@ -530,25 +530,20 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
     console.error('[TELEGRAM] Webhook setup failed:', e.message);
   });
 
-  // TEMP DEBUG: Signature verification DISABLED for admin ID capture
+  // Webhook route with signature verification
   app.post(webhookPath, (req, res) => {
     const incomingToken = req.headers['x-telegram-bot-api-secret-token'];
     
-    // Always log incoming request body for debugging
-    console.log('[WEBHOOK] Request body:', JSON.stringify(req.body).substring(0, 500));
-    console.log('[WEBHOOK] Secret token present:', incomingToken ? 'YES' : 'NO');
+    // Debug logging - always log incoming requests
+    console.log('[WEBHOOK] Request from:', req.ip, '| Token:', incomingToken ? 'present' : 'MISSING');
     
-    // TEMPORARILY DISABLED — re-enable after capturing admin ID
-    // if (!verifyTelegramSignature(req)) {
-    //   return res.status(403).send('Forbidden');
-    // }
-    
-    if (req.body && req.body.message) {
-      const chatId = req.body.message.chat?.id;
-      const text = req.body.message.text || '';
-      console.log('[WEBHOOK] CAPTURED — chatId:', chatId, 'text:', text);
+    // Verify Telegram signature
+    if (!verifyTelegramSignature(req)) {
+      console.warn('[WEBHOOK] REJECTED: invalid signature from', req.ip);
+      return res.status(403).send('Forbidden');
     }
     
+    console.log('[WEBHOOK] ACCEPTED valid update');
     processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
     
     // Respond immediately to avoid Telegram retries
