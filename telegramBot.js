@@ -9,8 +9,16 @@
  * - Admin replies from web panel OR from Telegram -> bot forwards to user
  */
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8795808560:AAEKW3jOkZPNFSlEJmNi1CW0Jmk3u_i8Rm4';
-const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '8916948567';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8795808560:***';
+
+// Support multiple admin IDs (comma-separated in env)
+const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_ID || '8916948567')
+  .split(',')
+  .map(id => id.trim())
+  .filter(id => id.length > 0);
+
+// Primary admin (first in list) — used for notifications
+const ADMIN_TELEGRAM_ID = ADMIN_TELEGRAM_IDS[0];
 
 // Secret token for webhook verification - MUST match what we send to Telegram via setWebhook
 // Telegram sends this back in x-telegram-bot-api-secret-token header
@@ -48,7 +56,7 @@ async function processUpdate(update) {
 
 // ============ ADMIN DETECTION ============
 function isAdmin(chatId) {
-  return String(chatId) === String(ADMIN_TELEGRAM_ID);
+  return ADMIN_TELEGRAM_IDS.includes(String(chatId));
 }
 
 // ============ FAQ KNOWLEDGE BASE ============
