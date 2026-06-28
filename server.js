@@ -1309,8 +1309,19 @@ app.get('/api/telegram/open-tickets', async (req, res) => {
 
 // Setup Telegram webhook (always enable)
 try {
-  const { setupWebhook } = require('./telegramBot');
+  const { setupWebhook, getLastAdminMessage } = require('./telegramBot');
   setupWebhook(app, '/webhook/telegram');
+  
+  // Debug endpoint: get last admin message info (for setup purposes)
+  app.get('/api/telegram/last-admin-message', async (req, res) => {
+    const info = getLastAdminMessage();
+    if (info) {
+      res.json({ success: true, adminId: info.chatId, text: info.text, timestamp: info.timestamp });
+    } else {
+      res.json({ success: false, message: 'No admin messages received yet' });
+    }
+  });
+  
   console.log('[TELEGRAM] Support bot enabled');
 } catch (e) {
   console.error('[TELEGRAM] Init failed:', e.message);

@@ -399,6 +399,7 @@ async function handleMessage(msg) {
   // CRITICAL: Admin check — if chatId matches admin, ALWAYS treat as admin
   if (isAdmin(chatId)) {
     console.log('[BOT] -> Routing to handleAdminMessage');
+    recordAdminMessage(chatId, text); // Store for debug endpoint
     await handleAdminMessage(msg);
   } else {
     console.log('[BOT] -> Routing to handleUserMessage');
@@ -557,6 +558,17 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
 }
 
 // ============ EXPORTS ============
+// Store last admin message for debugging
+let lastAdminMessage = null;
+
+function recordAdminMessage(chatId, text) {
+  lastAdminMessage = { chatId: String(chatId), text: String(text).substring(0, 100), timestamp: Date.now() };
+}
+
+function getLastAdminMessage() {
+  return lastAdminMessage;
+}
+
 module.exports = {
   setupWebhook,
   sendMessage,
@@ -564,5 +576,6 @@ module.exports = {
   closeTicket,
   notifyAdmin,
   registerTicket,
-  activeTickets
+  activeTickets,
+  getLastAdminMessage
 };
