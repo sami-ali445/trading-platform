@@ -15,3 +15,9 @@ services:
         generateValue: true
       - key: ALLOWED_ORIGIN
         value: "https://trading-platform-iglr.onrender.com"
+      - key: TELEGRAM_BOT_TOKEN
+        value: "8973004890:***"
+      - key: TELEGRAM_SECRET_TOKEN
+        value: "tp_webhook_secret_2025_secure_random_token_xyz123"
+      - key: ADMIN_TELEGRAM_ID
+        value: "8916948567"

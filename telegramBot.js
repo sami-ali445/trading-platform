@@ -506,13 +506,24 @@ function setupWebhook(app, webhookPath = '/webhook/telegram') {
 
   // Webhook route with signature verification
   app.post(webhookPath, (req, res) => {
+    const incomingToken = req.headers['x-telegram-bot-api-secret-token'];
+    
+    // Debug logging - always log incoming requests
+    console.log('[WEBHOOK] Incoming request from:', req.ip);
+    console.log('[WEBHOOK] Secret token present:', incomingToken ? 'YES (length=' + incomingToken.length + ')' : 'NO');
+    console.log('[WEBHOOK] Expected token length:', WEBHOOK_SECRET_TOKEN.length);
+    if (incomingToken) {
+      console.log('[WEBHOOK] Token match:', incomingToken === WEBHOOK_SECRET_TOKEN);
+    }
+    
     // Verify Telegram signature
     if (!verifyTelegramSignature(req)) {
-      console.warn('[WEBHOOK] Rejected: invalid signature from', req.ip);
+      console.warn('[WEBHOOK] REJECTED: invalid signature from', req.ip);
+      console.warn('[WEBHOOK] Incoming token:', incomingToken ? incomingToken.substring(0, 20) + '...' : 'null');
       return res.status(403).send('Forbidden');
     }
     
-    console.log('[WEBHOOK] Received valid update:', JSON.stringify(req.body).substring(0, 200));
+    console.log('[WEBHOOK] ACCEPTED valid update:', JSON.stringify(req.body).substring(0, 300));
     processUpdate(req.body).catch(e => console.error('[WEBHOOK] Error:', e.message));
     
     // Respond immediately to avoid Telegram retries
